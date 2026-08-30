@@ -1,0 +1,55 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+// 定位：packages/framework/bin/make — 脚手架 CLI 入口（vendor/bin/make 软链到本文件）。
+// 手写 argv 解析（不引入 symfony/console，铁律 8），分发到 Make\MakeActor / MakeSkill / MakeEvent / MakeMap。
+// Located at: packages/framework/bin/make — the scaffold CLI entry (vendor/bin/make symlinks here).
+// Hand-written argv parsing (no symfony/console, iron rule 8) that dispatches to Make\MakeActor / MakeSkill / MakeEvent / MakeMap.
+
+require __DIR__ . '/../../../vendor/autoload.php';
+
+use Nythros\Framework\Make\MakeActor;
+use Nythros\Framework\Make\MakeEvent;
+use Nythros\Framework\Make\MakeMap;
+use Nythros\Framework\Make\MakeSkill;
+
+const USAGE = <<<'TXT'
+用法 / Usage:
+  php vendor/bin/make make:actor <类名> --kind=player|monster|npc --ns=命名空间 --out=输出目录
+  php vendor/bin/make make:skill <技能名> --out=config/skills.php [--damage-multiplier=1.0 --cooldown-seconds=3.0 --range=5]
+  php vendor/bin/make make:event <事件名> --out=输出目录 [--ns=命名空间]
+  php vendor/bin/make make:map <地图名> --out=config/maps.php [--width=100 --height=100]
+
+示例 / Examples:
+  php vendor/bin/make make:actor MonsterActor --kind=monster --ns=Nythros\Demo\Game --out=packages/demo/src/Game
+  php vendor/bin/make make:skill Fireball --out=packages/demo/config/skills.php
+  php vendor/bin/make make:event PlayerKilled --out=packages/demo/src/Game
+  php vendor/bin/make make:map Forest --out=packages/demo/config/maps.php
+
+TXT;
+$command = $argv[1] ?? null;
+if ($command === null) {
+    fwrite(STDERR, USAGE);
+    exit(1);
+}
+
+$args = array_slice($argv, 2);
+
+try {
+    $target = match ($command) {
+        'make:actor' => (new MakeActor())->run($args),
+        'make:skill' => (new MakeSkill())->run($args),
+        'make:event' => (new MakeEvent())->run($args),
+        'make:map' => (new MakeMap())->run($args),
+        default => throw new InvalidArgumentException(sprintf('未知命令: %s', $command)),
+    };
+} catch (Throwable $e) {
+    fwrite(STDERR, sprintf("[make] 错误: %s\n", $e->getMessage()));
+    fwrite(STDERR, USAGE);
+    exit(1);
+}
+
+echo sprintf("[make] 已生成: %s\n", $target);
+exit(0);

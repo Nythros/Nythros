@@ -1,0 +1,12 @@
+# 构建上下文瘦身：依赖在镜像内安装，本地 vendor/缓存/文档产物不入镜像。
+# Slim the build context: deps are installed in-image; local vendor/caches/doc artifacts stay out.
+vendor/
+.git/
+.gitattributes
+.github/
+.php-cs-fixer.cache
+.phpunit.result.cache
+benchmarks/results/
+blueprint/
+clients/
+docs/

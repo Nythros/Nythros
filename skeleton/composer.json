@@ -1,0 +1,31 @@
+{
+    "name": "nythros/skeleton",
+    "type": "project",
+    "description": "Nythros 入门套件（create-project 模板）：最小但功能完整的 Map 游戏服务器——两种 World（AOI 局域 / 全量广播）、认证/移动/视野广播、巡游 NPC，基于 nythros/engine + nythros/framework 开箱即用。",
+    "license": "MIT",
+    "//": "依赖指向 Packagist 发布版本（nythros/engine ^0.1 / nythros/framework ^0.1）。当前 monorepo 开发阶段用下方 path 仓库替代（指向 ../packages/*，并将本地包模拟为 0.1.0 以便 ^0.1 约束可解析）；正式发布后移除 repositories 段、改走 Packagist 安装。",
+    "require": {
+        "php": ">=8.3",
+        "nythros/engine": "^0.1",
+        "nythros/framework": "^0.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "Nythros\\Skeleton\\": "src/"
+        }
+    },
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../packages/*",
+            "options": {
+                "versions": {
+                    "nythros/engine": "0.1.0",
+                    "nythros/framework": "0.1.0"
+                }
+            }
+        }
+    ],
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}

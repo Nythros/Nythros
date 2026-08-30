@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Nythros Canvas Demo（P19 图形化示例客户端）</title>
+<style>
+  body { font-family: Consolas, monospace; background: #101418; color: #cfd8dc; margin: 16px; }
+  #login, #hud { margin-bottom: 8px; }
+  #canvas { background: #1a222b; border: 1px solid #37474f; image-rendering: pixelated; }
+  input, button { font-family: inherit; background: #263238; color: #cfd8dc; border: 1px solid #546e7a; padding: 4px 8px; }
+  button { cursor: pointer; }
+  #status { color: #80cbc4; }
+  .warn { color: #ffb74d; }
+</style>
+</head>
+<body>
+<div id="login">
+  uid <input id="uid" value="1001" size="6">
+  password <input id="pwd" value="secret" size="8" type="password">
+  gateway <input id="gw" value="ws://127.0.0.1:18285" size="22">
+  map <input id="map" value="ws://127.0.0.1:18081" size="22">
+  <button id="btnConnect">连接</button>
+  <span id="status">未连接</span>
+</div>
+<div id="hud">
+  <button id="btnAttack">攻击最近怪物</button>
+  <span> WASD/方向键移动 · 点击画布移动到该格 · 怪=红 玩家=蓝 自己=绿 掉落=黄 </span>
+</div>
+<canvas id="canvas" width="800" height="600"></canvas>
+
+<script src="../nythros-client.js"></script>
+<script>
+'use strict';
+// P19 图形化示例：canvas 渲染 + NythrosInterpolator 插值（渲染读 sample()，逻辑读 position()——
+// docs/state-sync.md 的 checklist 的浏览器化落地）。
+// The P19 canvas demo: canvas rendering + NythrosInterpolator interpolation (rendering reads sample(),
+// logic reads position() — the browser-side application of the state-sync guide's checklist).
+
+const CELL = 32;                 // 每格像素 Pixels per cell.
+const VIEW_CELLS_X = 25;         // 画布横向格数 Canvas cells across.
+const tickHz = 20;               // 服务端 base tick 20Hz（插值窗口随 world:tick_rate 调整） Server base tick 20Hz.
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const statusEl = document.getElementById('status');
+let client = null;
+let selfId = null;
+let selfHp = null;
+
+function setStatus(text, warn) {
+  statusEl.textContent = text;
+  statusEl.className = warn ? 'warn' : '';
+}
+
+function connect() {
+  const uid = document.getElementById('uid').value;
+  const pwd = document.getElementById('pwd').value;
+  client = new NythrosClient({
+    username: uid,
+    password: pwd,
+    gatewayUrl: document.getElementById('gw').value,
+    mapUrl: document.getElementById('map').value,
+    autoReconnect: true,
+    baseTickMs: 1000 / tickHz,
+    logger: (line) => console.log(line),
+  });
+
+  client.on(':reconnecting', (e) => setStatus('重连中（第 ' + e.attempt + ' 次）…', true));
+  client.on(':reconnected', (e) => { selfId = e.entityId; setStatus('已重连（票据恢复）'); });
+  client.on(':reconnectfailed', () => setStatus('重连失败（尝试耗尽）', true));
+  client.on('player:stats', (f) => {
+    if (f.payload.uid === uid) { selfHp = f.payload.hp; }
+  });
+  client.on('entity_moved', (f) => {
+    if (f.payload.id === selfId) selfHp = selfHp; // 自身位移 STATE 帧跳过自身；位置以插值表为准 Own move frames skip self; the position comes from the interpolation table.
+  });
+
+  setStatus('连接中…');
+  client.connect().then((session) => {
+    selfId = session.entityId;
+    setStatus('已连接 entityId=' + session.entityId);
+  }).catch((e) => setStatus('连接失败：' + e.message, true));
+}
+
+document.getElementById('btnConnect').onclick = connect;
+document.getElementById('btnAttack').onclick = () => {
+  if (!client || !selfId) return;
+  const target = nearestMonster();
+  if (target) client.send('attack', { targetId: target.id }, 'canvas-atk');
+};
+
+// 键盘移动：dx/dy 相对步进（move 路由无成功回执——位置以 entity_moved/插值表为准）
+// Keyboard movement: relative dx/dy steps (the move route has no success receipt — the position lives in
+// entity_moved / the interpolation table).
+window.addEventListener('keydown', (e) => {
+  if (!client || !selfId) return;
+  const map = { w: [0, -1], s: [0, 1], a: [-1, 0], d: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
+  const step = map[e.key];
+  if (step) {
+    client.send('move', { dx: step[0], dy: step[1] }, 'canvas-move');
+    e.preventDefault();
+  }
+});
+
+canvas.addEventListener('click', (e) => {
+  if (!client || !selfId) return;
+  const me = client.interpolator.position(selfId);
+  if (!me) return;
+  const rect = canvas.getBoundingClientRect();
+  const world = screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+  client.send('move', { dx: world.x - me.x, dy: world.y - me.y }, 'canvas-move');
+});
+
+function nearestMonster() {
+  if (!client || !selfId) return null;
+  const me = client.interpolator.position(selfId);
+  let best = null;
+  let bestDist = Infinity;
+  client.interpolator.entities.forEach((e) => {
+    if (e.kind !== 'tick') return; // monster:spawned 登记的怪物 Registered via monster:spawned.
+    const d = Math.hypot(e.x - me.x, e.y - me.y);
+    if (d < bestDist) { bestDist = d; best = e; }
+  });
+  return best;
+}
+
+function cameraOrigin() {
+  const me = selfId ? client.interpolator.sample(selfId) : null;
+  const cx = me ? me.x : 0;
+  const cy = me ? me.y : 0;
+  return { x: cx - VIEW_CELLS_X / 2, y: cy - (canvas.height / CELL) / 2 };
+}
+
+function worldToScreen(wx, wy, cam) {
+  return { x: (wx - cam.x) * CELL, y: (wy - cam.y) * CELL };
+}
+
+function screenToWorld(sx, sy) {
+  const cam = cameraOrigin();
+  return { x: Math.floor(cam.x + sx / CELL), y: Math.floor(cam.y + sy / CELL) };
+}
+
+function render() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!client) { requestAnimationFrame(render); return; }
+
+  const cam = cameraOrigin();
+
+  // 网格 The grid.
+  ctx.strokeStyle = '#263238';
+  ctx.beginPath();
+  for (let gx = 0; gx <= VIEW_CELLS_X + 1; gx++) {
+    const p = worldToScreen(cam.x + gx, cam.y, cam);
+    ctx.moveTo(p.x, 0); ctx.lineTo(p.x, canvas.height);
+  }
+  for (let gy = 0; gy <= canvas.height / CELL + 1; gy++) {
+    const p = worldToScreen(cam.x, cam.y + gy, cam);
+    ctx.moveTo(0, p.y); ctx.lineTo(canvas.width, p.y);
+  }
+  ctx.stroke();
+
+  // 实体：渲染读 sample()（平滑），判定读 position()（权威）——state-sync 铁律
+  // Entities: rendering reads sample() (smoothed), judgment reads position() (authoritative) — the state-sync rule.
+  client.interpolator.entities.forEach((e) => {
+    const s = client.interpolator.sample(e.id);
+    const p = worldToScreen(s.x, s.y, cam);
+    if (p.x < -CELL || p.y < -CELL || p.x > canvas.width + CELL || p.y > canvas.height + CELL) return;
+    const color = e.id === selfId ? '#66bb6a' : (e.kind === 'tick' ? '#ef5350' : '#42a5f5');
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(p.x + CELL / 2, p.y + CELL / 2, CELL * 0.35, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#eceff1';
+    ctx.font = '10px monospace';
+    ctx.fillText(e.typeId ? e.typeId : e.id.split('@')[0], p.x + 2, p.y + CELL - 2);
+  });
+
+  // HUD The HUD.
+  ctx.fillStyle = '#eceff1';
+  ctx.font = '12px monospace';
+  const me = selfId ? client.interpolator.position(selfId) : null;
+  ctx.fillText('entityId=' + (selfId ?? '-') + '  权威位置=' + JSON.stringify(me ?? {}) + '  hp=' + (selfHp ?? '-'), 8, 16);
+
+  requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+</script>
+</body>
+</html>

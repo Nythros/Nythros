@@ -1,0 +1,14 @@
+{
+    "name": "nythros/demo",
+    "type": "library",
+    "require": {
+        "php": ">=8.3",
+        "nythros/engine": "^0.1",
+        "nythros/framework": "^0.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "Nythros\\Demo\\": "src/"
+        }
+    }
+}

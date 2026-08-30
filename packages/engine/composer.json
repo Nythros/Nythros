@@ -1,0 +1,33 @@
+{
+    "name": "nythros/engine",
+    "type": "library",
+    "description": "Nythros 游戏引擎核心（Game engine core）：契约、内核、调度、世界、实体、Actor、AOI、事件、网络、协议、安全、持久化、集群 15 个核心模块的物理合并。",
+    "license": "MIT",
+    "require": {
+        "php": ">=8.3",
+        "workerman/workerman": "^5.2.2"
+    },
+    "suggest": {
+        "ext-pdo_mysql": "MySqlStorage 需要；阶段 4 可裁剪项，缺失时裁剪 MySqlStorage 改用 InMemoryStorage（ADR-013 10.5）",
+        "ext-redis": "RedisTokenStore 与 RedisServiceRegistry 需要；缺失时请使用 InMemoryTokenStore 等替代实现"
+    },
+    "autoload": {
+        "psr-4": {
+            "Nythros\\Contracts\\": "src/Contracts/",
+            "Nythros\\Kernel\\": "src/Kernel/",
+            "Nythros\\KernelWorkerman\\": "src/KernelWorkerman/",
+            "Nythros\\Scheduler\\": "src/Scheduler/",
+            "Nythros\\World\\": "src/World/",
+            "Nythros\\Entity\\": "src/Entity/",
+            "Nythros\\Actor\\": "src/Actor/",
+            "Nythros\\Aoi\\": "src/Aoi/",
+            "Nythros\\Event\\": "src/Event/",
+            "Nythros\\Network\\": "src/Network/",
+            "Nythros\\NetworkWorkerman\\": "src/NetworkWorkerman/",
+            "Nythros\\Protocol\\": "src/Protocol/",
+            "Nythros\\Security\\": "src/Security/",
+            "Nythros\\Persistence\\": "src/Persistence/",
+            "Nythros\\Cluster\\": "src/Cluster/"
+        }
+    }
+}

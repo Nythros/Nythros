@@ -1,0 +1,87 @@
+# packages/demo/config/deploy.yaml —— 服务拓扑唯一事实源（ADR-013 决策 C：配置驱动部署；ADR-021 自研单栈）。
+# packages/demo/config/deploy.yaml — the single source of truth for the service topology (ADR-013 decision C: config-driven deployment; ADR-021 self-built single stack).
+#
+# 语义（ADR 3.1/3.2 / ADR-021）：
+# Semantics (ADR 3.1/3.2 / ADR-021):
+#   - redis：共享存储层（token 多 scope / 服务注册 / uid 寻址），host/port 由启动器传给每个 worker。
+#     redis: the shared storage tier (multi-scope tokens / service registry / uid addressing); host/port are passed to every worker by the launcher.
+#   - mysql：归档落库（ArchivePipeline 的 MySqlStorage 目标库），host/port/user/password/dbname 由启动器传给每个 worker；
+#     缺省 127.0.0.1:3306 / root / 空密码 / nythros（与 run-worker 的 CLI 缺省一致）。
+#     mysql: the archive persistence target (ArchivePipeline's MySqlStorage database); host/port/user/password/dbname are passed
+#     to every worker by the launcher; defaults 127.0.0.1:3306 / root / empty password / nythros (matching run-worker's CLI defaults).
+#   - processes：每个 process 块 = 一个部署单元（启动器为该单元内每个 service spawn 一个 run-worker 进程）；
+#     必填段——拓扑唯一事实源收敛于此（ADR-021 后无独立 gateway 段）。
+#     processes: each process block = one deployment unit (the launcher spawns one run-worker process per service inside the unit);
+#     a required section — the single topology source converges here (no separate gateway section after ADR-021).
+#   - social 单元：社交三角色 gateway/chat/team 各一进程，共用 SocialServer 类、连接表进程内独立（对称直连，ADR-021）；
+#     登录链路 auth_ok 下发 map/chat/team 三地址（map 地址经注册表动态分配，chat/team 地址由 bin/server 按本文件声明注入）。
+#     The social unit: one process per social role gateway/chat/team, sharing the SocialServer class with process-local connection
+#     tables (symmetric direct connections, ADR-021); auth_ok hands out all three map/chat/team addresses (the map address comes from
+#     dynamic registry discovery, the chat/team addresses are injected by bin/server from this file's declarations).
+#   - 统一编排：php bin/server start（全部声明组）/ --parts=social（只起社交）/ --parts=maps（只起地图/副本）。
+#     launch.php 仍是只起地图的便捷入口。启动铁序：Redis(外部) → social → map（Register 进程已随旧网关栈移除，ADR-021 §3.3）。
+#     Unified orchestration: php bin/server start (all declared groups) / --parts=social (social only) / --parts=maps (maps only).
+#     launch.php stays the maps-only convenience entry. Boot order: Redis (external) → social → map (the Register process is gone
+#     with the former gateway stack, ADR-021 §3.3).
+#   - map 服务必须声明 mapId + channelId（serviceId 编码 {mapId}#{channelId}，每频道一进程一 World）；社交三角色无需。
+#     A map service must declare mapId + channelId (serviceId encoding {mapId}#{channelId}, one process + one World per channel); the social roles need neither.
+#   - count 字段可选（实例数，默认 1；count>1 时展开为多个相同命令的 worker 进程）。
+#     The optional count field is the instance count (default 1; count>1 expands into multiple workers running the same command).
+#   - pidFile 字段可选（Workerman 单实例锁键，G-5）：显式声明时透传给 run-worker 覆盖其缺省值；
+#     缺省按 type+port 自动生成（如 /tmp/nythros-map-18081.pid），每个服务实例锁互不冲突，
+#     崩溃重启恢复不被陈旧单实例锁（pidFile + .lock）阻碍。
+#     The optional pidFile field (Workerman's singleton-lock key, G-5): an explicit declaration is passed to run-worker
+#     overriding its default; by default one is generated per type+port (e.g. /tmp/nythros-map-18081.pid), so every service
+#     instance locks independently and crash-restart recovery is never blocked by a stale singleton lock (pidFile + .lock).
+#
+# 端口约定：
+# Port convention:
+#   - 社交组：gateway 18285（对外 WebSocket，沿用原网关端口）/ chat 18286 / team 18287（相邻步进，风格与地图段一致）。
+#     Social group: gateway 18285 (public WebSocket, keeping the former gateway port) / chat 18286 / team 18287 (adjacent steps, consistent with the map section's style).
+#   - map-1：ch-1 18081 / ch-2 18082；map-2：ch-1 18083；dungeon-A：pool-1 18084（战斗层直连）。
+#     map-1: ch-1 18081 / ch-2 18082; map-2: ch-1 18083; dungeon-A: pool-1 18084 (combat-tier direct connections).
+#   - 端口全局唯一（重复由 DeployConfig 解析时拒绝）。
+#     Ports are globally unique (duplicates are rejected when DeployConfig parses).
+
+redis:
+  host: 127.0.0.1
+  port: 6379
+
+mysql:
+  host: 127.0.0.1
+  port: 3306
+  user: root
+  password: ""
+  dbname: nythros
+
+processes:
+  social:                      # 社交部署单元：三角色三进程（对称直连，各角色连接表独立）
+                               # Social deployment unit: three roles, three processes (symmetric direct connections, independent per-role connection tables)
+    - type: gateway
+      port: 18285
+    - type: chat
+      port: 18286
+    - type: team
+      port: 18287
+  map-1:                       # 地图部署单元：两频道两进程两 World（高频有状态，性能隔离） Map deployment unit: two channels, two processes, two Worlds (high-frequency stateful, performance isolation)
+    - type: map
+      mapId: map-1
+      channelId: ch-1
+      port: 18081
+    - type: map
+      mapId: map-1
+      channelId: ch-2
+      port: 18082
+  map-2:                       # 第二张地图：单频道 Map deployment unit of the second map: one channel
+    - type: map
+      mapId: map-2
+      channelId: ch-1
+      port: 18083
+  dungeon:                     # 副本/竞技场池（2a）：全量广播型 World（worldType: full），无空间索引
+                               # Dungeon/arena pool (2a): full-broadcast Worlds (worldType: full), no spatial index
+                               # mapId = 副本类型（dungeon-A/dungeon-B...），SocialService 按 mapId 过滤选副本、minPlayerCount 选进程池
+    - type: map
+      mapId: dungeon-A
+      channelId: pool-1
+      worldType: full
+      port: 18084

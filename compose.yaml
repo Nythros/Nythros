@@ -1,0 +1,82 @@
+# compose.yaml —— 本地开发依赖栈（R5 工程纵深：Docker Compose 一等公民）。
+# 与 packages/demo/config/deploy.yaml 的 redis/mysql 段完全对齐：
+#   redis → 127.0.0.1:6379（无密码）；mysql → 127.0.0.1:3306 / root / 空密码 / 预建 nythros 库。
+# compose.yaml — the local development dependency stack (R5 engineering depth: Docker Compose as a first-class citizen).
+# Fully aligned with the redis/mysql sections of packages/demo/config/deploy.yaml:
+#   redis → 127.0.0.1:6379 (no password); mysql → 127.0.0.1:3306 / root / empty password / pre-created nythros database.
+#
+# 用法 Usage:
+#   docker compose up -d                  # 启动依赖 Start the dependencies only（缺省默认行为 unchanged）
+#   php bin/server start                  # 宿主机直接起服务（deploy.yaml 缺省地址即指向本栈）
+#                                          # Start the servers on the host (deploy.yaml's default addresses point at this stack)
+#   docker compose --profile app up -d --build
+#                                          # 依赖 + 容器化应用（官方 Dockerfile）Dependencies + the containerized app
+#   docker compose down                   # 停止并移除 Stop and remove
+#
+# 说明 Notes:
+#   - 依赖栈与 packages/demo/config/deploy.yaml 对齐；容器化 app 服务由根目录 Dockerfile 构建
+#     （php:8.3-cli 基础镜像缺 ext-redis/pdo_mysql，已在镜像内补齐），挂 profile: app，
+#     缺省 `docker compose up -d` 仍只起依赖。部署细节见 docs/deployment.md。
+#   - Dependency stack matches packages/demo/config/deploy.yaml. The containerized app service is built
+#     from the root Dockerfile (the stock php:8.3-cli base lacks ext-redis/pdo_mysql; both are installed
+#     in the image) and gated behind profile: app, so the default `docker compose up -d` still starts
+#     dependencies only. See docs/deployment.md.
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: nythros-redis
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mysql:
+    image: mysql:8.0
+    container_name: nythros-mysql
+    ports:
+      - "127.0.0.1:3306:3306"
+    environment:
+      # root 空密码 + 预建 nythros 库——与 deploy.yaml mysql 段及 run-worker CLI 缺省一致。
+      # Empty root password + pre-created nythros database — matching deploy.yaml's mysql section and run-worker's CLI defaults.
+      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+      MYSQL_DATABASE: nythros
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # 容器化应用（profile: app）——`docker compose --profile app up -d --build` 显式启用。
+  # Containerized app (profile: app) — enabled explicitly via `docker compose --profile app up -d --build`.
+  app:
+    build: .
+    image: nythros/server
+    profiles: ["app"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    ports:
+      - "18285:18285"   # social gateway
+      - "18286:18286"   # social chat
+      - "18287:18287"   # social team
+      - "18081:18081"   # map-1#ch-1
+      - "18082:18082"   # map-1#ch-2
+      - "18083:18083"   # map-2#ch-1
+      - "18084:18084"   # dungeon-A#pool-1
+      - "19100:19100"   # metrics exporter（docs/deployment.md）
+    environment:
+      NYTHROS_MMORPG: "1"
+      NYTHROS_GAMEPLAY: "1"
+    # 拓扑事实源挂载为卷：容器内访问依赖需把 deploy.yaml 的 redis/mysql host 从 127.0.0.1
+    # 改为 compose 服务名（redis / mysql），改宿主机文件即时生效、免重建镜像。
+    # The topology file is volume-mounted: inside the compose network, switch the redis/mysql hosts in
+    # deploy.yaml from 127.0.0.1 to the compose service names (redis / mysql); edits apply without rebuild.
+    volumes:
+      - ./packages/demo/config:/app/packages/demo/config
+    command: ["php", "-d", "memory_limit=512M", "bin/server", "start"]

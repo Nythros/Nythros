@@ -1,0 +1,451 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+// 定位：bin/server — 根编排壳（不属于 framework；import demo 编排脚本 + framework Deploy 配置模型）。
+// 统一启动编排：读 deploy.yaml（DeployConfig）→ 按声明组起服务——社交组（gateway/chat/team 三角色逐 service
+// spawn run-worker.php --service=<type>，ADR-021 自研单栈）与地图/副本组（bin/start-maps.php：Workerman 原生多频道
+// 单入口，一个 master 管全部频道进程）各自可选；两者可 all-in-one 一起起，也可单独部署（--parts 过滤；
+// 跨进程互通靠 Redis 注册表：Map 进程 register → 社交层 discover 分配）。
+// Located at: bin/server — the root orchestration shell (not part of framework; imports demo orchestration scripts
+// and the framework Deploy config model). Unified startup orchestration: reads deploy.yaml (DeployConfig) and boots
+// the declared groups — the social group (one spawn of run-worker.php --service=<type> per gateway/chat/team role,
+// ADR-021's self-built single stack) and the map/dungeon group (one process, one World per channel) are each optional;
+// they can boot all-in-one or deploy independently (--parts filtering; cross-process discovery rides the Redis registry:
+// Map workers register, the social tier discovers and assigns).
+//
+// 用法 / Usage:
+//   php bin/server start      [deploy.yaml] [--parts=all|social|maps]   启动（Ctrl+C 停止）
+//   php bin/server status     [deploy.yaml]                             查看运行清单
+//   php bin/server stop       [deploy.yaml]                             逆序优雅停（Map → Social）
+//   --parts：all（缺省，起 social 与 maps 声明组）/ social（只起社交组）/ maps（只起地图/副本组）。
+//   Redis 前置（外部）：deploy.yaml 的 redis 段给出连接（启动前检查），端口另可用环境变量透传注册中心防冲突。
+
+const RUN_DIR = '/tmp/nythros-server';
+const RUN_FILE = RUN_DIR . '/run.json';
+
+$root = dirname(__DIR__);
+require $root . '/vendor/autoload.php';
+
+use Nythros\Framework\Deploy\DeployConfig;
+
+function projectRoot(): string
+{
+    return dirname(__DIR__);
+}
+
+function ensureRunDir(): void
+{
+    if (!is_dir(RUN_DIR) && !mkdir(RUN_DIR, 0777, true) && !is_dir(RUN_DIR)) {
+        fwrite(STDERR, '[server] fatal: 无法创建运行目录 ' . RUN_DIR . "\n");
+        exit(1);
+    }
+}
+
+function writeRun(array $run): void
+{
+    ensureRunDir();
+    $json = json_encode($run, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+    if ($json === false || file_put_contents(RUN_FILE, $json . PHP_EOL) === false) {
+        fwrite(STDERR, '[server] fatal: 无法写入运行清单 ' . RUN_FILE . "\n");
+        exit(1);
+    }
+}
+
+/**
+ * 读取运行清单；不存在或非法返回 null。
+ * Reads the run manifest; returns null when absent or malformed.
+ *
+ * @return null|array{services: array<string, array{pid: int, log: string}>, order: list<string>}
+ */
+function readRun(): ?array
+{
+    if (!is_file(RUN_FILE)) {
+        return null;
+    }
+    $contents = file_get_contents(RUN_FILE);
+    if ($contents === false) {
+        return null;
+    }
+    $run = json_decode($contents, true);
+    if (!is_array($run) || !isset($run['services']) || !is_array($run['services'])) {
+        return null;
+    }
+    $services = [];
+    $order = [];
+    foreach ($run['services'] as $name => $info) {
+        if (is_array($info) && isset($info['pid']) && is_numeric($info['pid'])) {
+            $services[$name] = [
+                'pid' => (int) $info['pid'],
+                'log' => is_string($info['log'] ?? null) ? $info['log'] : '',
+            ];
+            $order[] = (string) $name;
+        }
+    }
+
+    return ['services' => $services, 'order' => $order];
+}
+
+/** 解析 CLI：取出命令、配置路径与 --parts 选择。 Parses the CLI: command, config path and the --parts selection. */
+function parseCli(array $argv): array
+{
+    $command = $argv[1] ?? null;
+    $configPath = null;
+    $parts = 'all';
+    foreach (array_slice($argv, 2) as $arg) {
+        if (str_starts_with($arg, '--parts=')) {
+            $parts = substr($arg, strlen('--parts='));
+            continue;
+        }
+        if (str_starts_with($arg, '-')) {
+            continue;
+        }
+        $configPath = $arg;
+    }
+    $configPath ??= projectRoot() . '/packages/demo/config/deploy.yaml';
+    if (!in_array($parts, ['all', 'social', 'maps'], true)) {
+        throw new \InvalidArgumentException('[server] --parts 必须是 all|social|maps');
+    }
+
+    return ['command' => $command, 'config' => $configPath, 'parts' => $parts];
+}
+
+/**
+ * 按配置构建服务清单（声明顺序即启动顺序：社交组先起，地图/副本组随后——地图进程向 Redis 注册表 register，
+ * 社交层经 discover 分配，启动铁序 ADR-021 §3.3：Redis(外部) → social → map）。
+ * Builds the service list from the config (declaration order = boot order: the social group first, then the
+ * map/dungeon group — map workers register into the Redis registry and the social tier discovers/assigns).
+ *
+ * @param string $configPath 配置路径（maps 分支透传给 start-maps.php） Config path (passed to start-maps.php by the maps branch).
+ * @return list<array{name: string, cmd: list<string>, env: array<string, string>}>
+ */
+function buildServices(DeployConfig $config, string $parts, string $configPath): array
+{
+    $root = projectRoot();
+    $services = [];
+    $redis = $config->redis();
+
+    // 社交组（可选）：gateway/chat/team 三角色逐 service spawn run-worker.php --service=<type>；
+    // 各角色连接表进程内独立（对称直连），env 注入 Redis 连接、mapId 白名单与 chat/team 对外地址
+    // （地址按 deploy.yaml 服务声明生成，auth_ok 据此下发三地址，ADR-021 §3.2）
+    // Social group (optional): one spawn of run-worker.php --service=<type> per gateway/chat/team role; each role keeps
+    // a process-local connection table (symmetric direct connections). The env injects the Redis connection, the mapId
+    // whitelist and the chat/team public addresses (generated from deploy.yaml's service declarations so auth_ok hands
+    // out all three addresses, ADR-021 §3.2)
+    if (in_array($parts, ['all', 'social'], true)) {
+        $socialWorkers = array_filter(
+            $config->workers(),
+            static fn ($worker): bool => in_array($worker->service->type, ['gateway', 'chat', 'team'], true),
+        );
+        if ($socialWorkers !== []) {
+            $addressOf = static function (string $type) use ($config): ?string {
+                foreach ($config->workers() as $worker) {
+                    if ($worker->service->type === $type) {
+                        return sprintf('ws://127.0.0.1:%d', $worker->service->port);
+                    }
+                }
+
+                return null;
+            };
+            $chatAddress = $addressOf('chat');
+            $teamAddress = $addressOf('team');
+            $mapIds = $config->mapIds();
+
+            foreach ($socialWorkers as $worker) {
+                $env = getenv();
+                $env['REDIS_HOST'] = $redis['host'];
+                $env['REDIS_PORT'] = (string) $redis['port'];
+                // NYTHROS_MAP_IDS 空串语义（ADR-021）：deploy.yaml 未声明 map 时显式注入 ''——读侧 run-worker
+                // 以 getenv 存在性判断区分「未设置」（回退缺省）与「空串」（显式空白名单，不回退）。
+                // NYTHROS_MAP_IDS empty-string semantics (ADR-021): when deploy.yaml declares no map, '' is injected
+                // explicitly — the reader (run-worker) checks existence via getenv to tell "unset" (falls back to the
+                // default) from "empty" (an explicit empty whitelist, no fallback).
+                $env['NYTHROS_MAP_IDS'] = implode(',', $mapIds);
+                if ($chatAddress !== null) {
+                    $env['NYTHROS_CHAT_ADDRESS'] = $chatAddress;
+                }
+                if ($teamAddress !== null) {
+                    $env['NYTHROS_TEAM_ADDRESS'] = $teamAddress;
+                }
+                $services[] = [
+                    'name' => 'social-' . $worker->service->type,
+                    'cmd' => DeployConfig::buildCommand($worker, $root . '/packages/demo/bin/run-worker.php', $redis),
+                    'env' => $env,
+                ];
+            }
+        }
+    }
+
+    // 地图/副本组（可选）：单入口 spawn bin/start-maps.php（Workerman 原生多频道，一个 master 管全部频道进程，
+    // 自带监督/自动重启/reload/status；频道组装与 run-worker 共用 MapChannelFactory）
+    // Map/dungeon group (optional): spawns bin/start-maps.php as one service (the native multi-channel Workerman entry,
+    // one master over every channel process, with built-in supervision/auto-restart/reload/status; the channel assembly
+    // is shared with run-worker via MapChannelFactory)
+    if (in_array($parts, ['all', 'maps'], true)) {
+        $mapWorkers = array_filter(
+            $config->workers(),
+            static fn ($worker): bool => $worker->service->type === 'map',
+        );
+        if ($mapWorkers !== []) {
+            $services[] = [
+                'name' => 'maps',
+                'cmd' => [PHP_BINARY, $root . '/bin/start-maps.php', $configPath],
+                'env' => getenv(),
+            ];
+        }
+    }
+
+    return $services;
+}
+
+/**
+ * 单服务 spawn：数组命令 + bypass_shell + 独立日志文件 + 显式环境（继承当前环境后按配置覆盖）。
+ * Spawns one service: array command + bypass_shell + a per-service log file + an explicit env (the current environment
+ * inherited, overridden by the config values).
+ *
+ * @param array{name: string, cmd: list<string>, env: array<string, string>} $spec
+ * @return array{proc: resource, pid: int, log: string}
+ */
+function spawnService(array $spec): array
+{
+    ensureRunDir();
+    $logPath = RUN_DIR . '/' . $spec['name'] . '.log';
+    $proc = proc_open(
+        $spec['cmd'],
+        [0 => STDIN, 1 => ['file', $logPath, 'a'], 2 => ['file', $logPath, 'a']],
+        $pipes,
+        projectRoot(),
+        $spec['env'],
+        ['bypass_shell' => true],
+    );
+    if (!is_resource($proc)) {
+        throw new \RuntimeException(sprintf('[server] spawn 失败: %s（%s）', $spec['name'], implode(' ', $spec['cmd'])));
+    }
+    $status = proc_get_status($proc);
+
+    return ['proc' => $proc, 'pid' => $status['pid'], 'log' => $logPath];
+}
+
+/** 按配置的 Redis 连接做启动前检查（失败 = 明确报错退出，不带着坏依赖起服务）。 Pre-boot Redis check against the configured connection. */
+function checkRedis(DeployConfig $config): void
+{
+    $redis = new \Redis();
+    $host = $config->redis()['host'];
+    $port = $config->redis()['port'];
+    try {
+        $connected = @$redis->connect($host, $port, 1.0);
+    } catch (\Throwable) {
+        $connected = false;
+    }
+    if ($connected !== true || !$redis->ping()) {
+        fwrite(STDERR, sprintf('[server] fatal: Redis 不可用（%s:%d ping 失败），启动中止\n', $host, $port));
+        exit(1);
+    }
+}
+
+function cmdStart(DeployConfig $config, string $parts, string $configPath): void
+{
+    checkRedis($config);
+
+    $existing = readRun();
+    if ($existing !== null) {
+        foreach ($existing['services'] as $name => $info) {
+            if (function_exists('posix_kill') && @posix_kill($info['pid'], 0)) {
+                fwrite(STDERR, sprintf('[server] 已有运行实例（%s pid=%d），请先 bin/server stop\n', $name, $info['pid']));
+                exit(1);
+            }
+        }
+    }
+
+    $services = buildServices($config, $parts, $configPath);
+    if ($services === []) {
+        fwrite(STDERR, sprintf('[server] fatal: --parts=%s 下没有可启动的服务（deploy.yaml 未声明该组或已被过滤）\n', $parts));
+        exit(1);
+    }
+
+    $children = [];
+    $manifest = [];
+    $order = [];
+    try {
+        foreach ($services as $spec) {
+            $child = spawnService($spec);
+            $children[$spec['name']] = $child;
+            $manifest[$spec['name']] = ['pid' => $child['pid'], 'log' => $child['log']];
+            $order[] = $spec['name'];
+            printf("[server] spawned %-22s pid=%d log=%s\n", $spec['name'], $child['pid'], $child['log']);
+        }
+    } catch (\Throwable $e) {
+        foreach ($children as $child) {
+            proc_terminate($child['proc'], 15);
+        }
+        fwrite(STDERR, '[server] fatal: ' . $e->getMessage() . "\n");
+        exit(1);
+    }
+
+    writeRun(['startedAt' => date('c'), 'services' => $manifest, 'order' => $order]);
+    echo '[server] 运行清单已写入 ' . RUN_FILE . "\n";
+
+    waitAndForward($children);
+}
+
+/**
+ * 前台等待 + 信号转发：SIGINT/SIGTERM → 全服务 SIGTERM；SIGCHLD → 收割并打印。
+ * Foreground wait + signal forwarding: SIGINT/SIGTERM → SIGTERM to every service; SIGCHLD → reap and report.
+ *
+ * @param array<string, array{proc: resource, pid: int, log: string}> $children
+ */
+function waitAndForward(array $children): void
+{
+    if (!function_exists('pcntl_signal')) {
+        fwrite(STDERR, "[server] 无 pcntl：信号转发不可用，子进程继续运行（可用 bin/server status/stop 管理）\n");
+        while (true) {
+            usleep(200000);
+        }
+    }
+
+    $stopAt = null;
+    $allExited = false;
+    $handler = static function (int $signo) use (&$children, &$stopAt, &$allExited): void {
+        if ($signo === SIGCHLD) {
+            while (($exited = pcntl_waitpid(-1, $status, WNOHANG)) > 0) {
+                foreach ($children as $name => $child) {
+                    if ($child['pid'] === $exited) {
+                        echo sprintf("[server] service exited %-22s pid=%d\n", $name, $exited);
+                        unset($children[$name]);
+                    }
+                }
+            }
+            if ($children === []) {
+                $allExited = true;
+            }
+
+            return;
+        }
+
+        if ($stopAt !== null) {
+            return;
+        }
+        echo sprintf("[server] received signal %d, stopping all services...\n", $signo);
+        foreach ($children as $child) {
+            proc_terminate($child['proc'], 15);
+        }
+        $stopAt = microtime(true) + 5.0;
+    };
+    pcntl_signal(SIGINT, $handler);
+    pcntl_signal(SIGTERM, $handler);
+    pcntl_signal(SIGCHLD, $handler);
+
+    while (true) {
+        pcntl_signal_dispatch();
+        usleep(200000);
+        if ($stopAt !== null && ($children === [] || microtime(true) >= $stopAt)) {
+            break;
+        }
+        if ($allExited) {
+            break;
+        }
+    }
+
+    @unlink(RUN_FILE);
+    echo "[server] 前台会话结束，运行清单已清理\n";
+}
+
+function cmdStatus(DeployConfig $config): void
+{
+    $run = readRun();
+    if ($run === null) {
+        fwrite(STDERR, '[server] 无运行清单（' . RUN_FILE . " 不存在）\n");
+        exit(0);
+    }
+    if ($run['services'] === []) {
+        fwrite(STDERR, "[server] 运行清单为空\n");
+        exit(0);
+    }
+    foreach ($run['order'] as $name) {
+        $info = $run['services'][$name] ?? null;
+        if ($info === null) {
+            printf("[server] %-22s pid=--- 状态=unknown（清单缺失）\n", $name);
+            continue;
+        }
+        $state = (function_exists('posix_kill') && @posix_kill($info['pid'], 0)) ? 'running' : 'stopped';
+        printf("[server] %-22s pid=%d 状态=%s\n", $name, $info['pid'], $state);
+    }
+}
+
+function cmdStop(): void
+{
+    $run = readRun();
+    if ($run === null) {
+        fwrite(STDERR, "[server] 无运行清单（" . RUN_FILE . " 不存在），无需停止\n");
+        exit(0);
+    }
+
+    // 降级提示（与 waitAndForward 的无 pcntl 提示同风格）：无 posix 扩展时无法发送信号，仅能清理清单
+    // Degradation notice (same style as waitAndForward's no-pcntl notice): without the posix extension no signal can be
+    // sent, so only the manifest is cleaned up
+    if (!function_exists('posix_kill')) {
+        fwrite(STDERR, "[server] 无 posix：无法发送停止信号，进程可能残留（请按 run.json 记录的 pid 手动核对清理）\n");
+    }
+
+    // 逆序优雅停：Map → Social（启动铁序的反序，ADR-021 §3.3）
+    // Graceful stop in reverse order: Map → Social (the reverse of the boot order, ADR-021 §3.3)
+    $order = array_reverse($run['order']);
+    foreach ($order as $name) {
+        $info = $run['services'][$name] ?? null;
+        if ($info === null) {
+            continue;
+        }
+        if (function_exists('posix_kill') && @posix_kill($info['pid'], 0)) {
+            printf("[server] stopping %-22s pid=%d\n", $name, $info['pid']);
+            posix_kill($info['pid'], 15);
+        }
+    }
+
+    $deadline = microtime(true) + 5.0;
+    while (microtime(true) < $deadline) {
+        $alive = false;
+        foreach ($order as $name) {
+            $info = $run['services'][$name] ?? null;
+            if ($info !== null && function_exists('posix_kill') && @posix_kill($info['pid'], 0)) {
+                $alive = true;
+            }
+        }
+        if (!$alive) {
+            break;
+        }
+        usleep(200000);
+    }
+
+    @unlink(RUN_FILE);
+    echo "[server] 全部服务已停止，运行清单已清理\n";
+}
+
+try {
+    $cli = parseCli($argv);
+} catch (\Throwable $e) {
+    fwrite(STDERR, '[server] 错误: ' . $e->getMessage() . "\n");
+    fwrite(STDERR, "用法 / Usage: php bin/server <start|status|stop> [deploy.yaml] [--parts=all|social|maps]\n");
+    exit(1);
+}
+
+try {
+    $config = DeployConfig::parseYaml((string) file_get_contents($cli['config']));
+} catch (\Throwable $e) {
+    fwrite(STDERR, sprintf("[server] fatal: 无法解析 %s：%s\n", $cli['config'], $e->getMessage()));
+    exit(1);
+}
+
+try {
+    match ($cli['command']) {
+        'start' => cmdStart($config, $cli['parts'], $cli['config']),
+        'status' => cmdStatus($config),
+        'stop' => cmdStop(),
+        default => throw new \InvalidArgumentException(sprintf('未知命令: %s', (string) $cli['command'])),
+    };
+    exit(0);
+} catch (\Throwable $e) {
+    fwrite(STDERR, '[server] 错误: ' . $e->getMessage() . "\n");
+    fwrite(STDERR, "用法 / Usage: php bin/server <start|status|stop> [deploy.yaml] [--parts=all|social|maps]\n");
+    exit(1);
+}

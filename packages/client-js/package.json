@@ -1,0 +1,22 @@
+{
+  "name": "@nythros/client",
+  "version": "0.1.0",
+  "description": "Nythros 官方 JS SDK：二进制协议编解码 + 登录链路 + 事件订阅/回执 + 插值引擎（零依赖，Node ≥22 / 浏览器通用）。 The official Nythros JS SDK: binary codec + login chain + events/receipts + the interpolation engine (zero-dependency, Node >=22 / browser compatible).",
+  "main": "nythros-client.js",
+  "types": "nythros-client.d.ts",
+  "files": [
+    "nythros-client.js",
+    "nythros-client.d.ts",
+    "examples/",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "generate:definitions": "php scripts/generate-definitions.php"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "keywords": ["nythros", "game-server", "websocket", "mmo", "interpolation"],
+  "license": "MIT"
+}

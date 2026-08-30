@@ -1,0 +1,12 @@
+{
+    "world_update_ms_per_frame_entities100": 0.005512101,
+    "world_update_ms_per_frame_entities500": 0.025527702000000003,
+    "world_update_ms_per_frame_entities1000": 0.039790303,
+    "aoi_query_ops_per_sec": 467159.9117497554,
+    "aoi_update_entity_ops_per_sec": 1930715.998948918,
+    "event_bus_publish_envelope_ops_per_sec": 5854781.740762442,
+    "event_bus_enqueue100_flush_batches_per_sec": 84586.87916244102,
+    "binary_batch_encode_batches_per_sec": 66897.52042099493,
+    "binary_batch_decode_batches_per_sec": 29545.556151950663,
+    "json_encode_frames_per_sec": 627113.7063445376
+}

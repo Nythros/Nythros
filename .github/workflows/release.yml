@@ -1,0 +1,140 @@
+# Release —— 打 v* tag 触发，四段流水线（ADR-019 决策 B 落地：monorepo 唯一开发源 + subsplit 发布镜像）：
+#   ① release：质量门禁（phpunit/phpstan）→ composer 打包 zip → GitHub Release（永不因发布配置缺失而失败）
+#   ② subsplit：git subtree split 把 packages/engine、packages/framework 拆到 Nythros/engine、
+#      Nythros/framework 独立仓（包 composer.json 在拆分仓根目录，Packagist 才可识别）——未配
+#      SUBSPLIT_TOKEN secret 时整个 job 跳过（渐进启用，不阻塞 ①）
+#   ③ packagist：显式 POST 更新两个包的 webhook——未配 PACKAGIST_TOKEN 时跳过（若已在 Packagist
+#      后台为拆分仓配好 GitHub webhook，此 job 不配也无妨，双保险）
+#   ④ npm：@nythros/client 发布——未配 NPM_TOKEN 时跳过（npm org 暂不动的当前阶段即走此分支）
+# 人工前置清单见 blueprint/adr/ADR-019 §5 与 docs/deployment.md 发布节。
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Release ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: redis
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Verify (PHPUnit + PHPStan)
+        run: |
+          vendor/bin/phpunit
+          vendor/bin/phpstan analyse --no-progress
+
+      - name: Pack composer archives (nythros/engine, nythros/framework)
+        run: |
+          mkdir -p dist
+          composer archive nythros/engine --format=zip --dir=dist
+          composer archive nythros/framework --format=zip --dir=dist
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ github.ref_name }}
+          path: dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          generate_release_notes: true
+
+  # subsplit：tag 驱动的发布镜像。SUBSPLIT_TOKEN = 对 Nythros/engine、Nythros/framework
+  # 有 Contents:write 的 PAT（fine-grained 即可）。拆分仓必须建为空仓（不勾 README/gitignore），
+  # 首推由本 job 完成；后续每次 tag 重算拆分并强制同步 main + 同名版本 tag。
+  subsplit:
+    name: Subsplit packages to Nythros/{engine,framework}
+    runs-on: ubuntu-latest
+    needs: release
+    if: ${{ secrets.SUBSPLIT_TOKEN != '' }}
+    strategy:
+      matrix:
+        package: [engine, framework]
+    steps:
+      - name: Checkout (full history for subtree split)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Split subdirectory
+        run: |
+          git config user.name "nythros-release-bot"
+          git config user.email "release-bot@nythros.local"
+          git subtree split -P "packages/${{ matrix.package }}" -b "subsplit-${GITHUB_REF_NAME}"
+
+      - name: Push mirror (main + version tag)
+        run: |
+          git push --force \
+            "https://x-access-token:${{ secrets.SUBSPLIT_TOKEN }}@github.com/Nythros/${{ matrix.package }}.git" \
+            "refs/heads/subsplit-${GITHUB_REF_NAME}:refs/heads/main"
+          git tag -f "${GITHUB_REF_NAME}" "subsplit-${GITHUB_REF_NAME}"
+          git push --force \
+            "https://x-access-token:${{ secrets.SUBSPLIT_TOKEN }}@github.com/Nythros/${{ matrix.package }}.git" \
+            "refs/tags/${GITHUB_REF_NAME}"
+
+  # packagist 显式触发（可选双保险）：PACKAGIST_TOKEN = packagist.com/profile 的 API token，
+  # PACKAGIST_USERNAME = packagist 用户名。拆分仓若已在 packagist 注册并配 GitHub webhook，
+  # 此 job 可跳过不配；两者都就绪时 webhook 与显式 POST 幂等共存。
+  packagist:
+    name: Notify Packagist
+    runs-on: ubuntu-latest
+    needs: subsplit
+    # needs 的 subsplit 被跳过时本 job 亦被跳过（默认行为即符合预期：拆分未启用则包不存在）
+    steps:
+      - name: Update packages
+        if: ${{ secrets.PACKAGIST_TOKEN != '' }}
+        run: |
+          for pkg in engine framework; do
+            curl -sf -X POST "https://packagist.org/api/update-package?username=${{ secrets.PACKAGIST_USERNAME }}&apiToken=${{ secrets.PACKAGIST_TOKEN }}" \
+              -d "repository[url]=https://github.com/Nythros/${pkg}" \
+              && echo "packagist updated: nythros/${pkg}"
+          done
+
+  # npm 自动发布：@nythros/client 随 v* tag 发布（需 repo secret NPM_TOKEN；test/ 不在 files
+  # 清单，包体干净）。npm 侧暂不启用：不配 secret 即整 job 跳过，不产生失败。
+  # 启用前置：npmjs.com 注册 @nythros org + package.json 去 "version": "dev-main"（ProtocolVocabulary
+  # 守卫要求 0.1.0，需同步 PHP 枚举并跑 phpunit）+ Automation token 入 NPM_TOKEN。
+  npm:
+    name: Publish @nythros/client
+    runs-on: ubuntu-latest
+    needs: release
+    if: ${{ secrets.NPM_TOKEN != '' }}
+    defaults:
+      run:
+        working-directory: packages/client-js
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Tests (node:test)
+        run: npm test
+
+      - name: Publish
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

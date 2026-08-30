@@ -1,0 +1,93 @@
+# mkdocs.yml —— GitHub Pages 文档站配置（Material for MkDocs）。
+# 本地预览：pip install -r requirements.txt && mkdocs serve
+# 构建：mkdocs build（CI 在 .github/workflows/pages.yml 推 master 自动部署）。
+# 站点只收录 docs/（用户文档）；blueprint（设计决策/验收记录）留在仓库，站内以 GitHub 链接跳转。
+
+site_name: Nythros
+site_description: PHP 游戏服务器引擎框架 —— Actor + AOI + 多进程拓扑 + 服务端权威状态同步
+site_url: https://nythros.github.io/Nythros/
+repo_url: https://github.com/nythros/nythros
+repo_name: nythros/nythros
+edit_uri: edit/master/docs/
+
+theme:
+  name: material
+  language: zh
+  icon:
+    # 头栏右上「仓库按钮」图标（fontawesome 品牌图标 = GitHub 章鱼猫）；按钮本身由 repo_url 自动渲染
+    repo: fontawesome/brands/github
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - content.code.copy
+  palette:
+    # 自动跟随系统深浅色
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: 切换到深色
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: 切换到浅色
+
+nav:
+  - 首页: index.md
+  - 入门:
+      - 快速启动: quick-start.md
+      - 架构总览: architecture.md
+      - 线协议: protocol.md
+  - 核心机制:
+      - Actor 指南: actor-guide.md
+      - AOI / 视野: cell-guide.md
+      - 状态同步与插值: state-sync.md
+      - 插件机制: plugin-guide.md
+  - 功能模式:
+      - 房间制玩法: room-mode.md
+      - MMORPG 大地图: mmorpg-mode.md
+      - 战斗与数值: combat-guide.md
+      - 社交与经济: social-guide.md
+  - 工程实践:
+      - 最佳实践: best-practices.md
+      - 测试指南: testing-guide.md
+      - 安全指南: security.md
+      - 性能与压测: performance.md
+      - 公开 API 一览: api-reference.md
+      - 部署指南: deployment.md
+      - 持久化指南: persistence-guide.md
+      - Unity/C# 接入: unity-guide.md
+
+plugins:
+  - search
+  # blueprint（设计决策与验收记录）不在 docs_dir，站内导航给出 GitHub 入口
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - def_list
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/nythros/nythros
+  generator: false
+
+copyright: Copyright &copy; 2026 Nythros 团队 · MIT License

@@ -1,0 +1,106 @@
+// nythros_message.proto —— Nythros 协议信封 proto3 IDL（ADR-022 第二轨）。
+// 本文件即协议文档唯一事实源（ADR-022 决策 3）：选择 Protobuf 轨时，导出本 IDL 即交付客户端契约。
+// 引擎只提供通用信封编解码（ProtobufSerializer 手写最小 wire format，零外部依赖），不内置任何业务 proto；
+// 业务消息一律经 payload（通用 Value 树）承载，与 JsonSerializer/MsgpackSerializer 的 Message 四字段语义同构。
+//
+// nythros_message.proto — the Nythros protocol-envelope proto3 IDL (the second track of ADR-022).
+// This file is the single source of truth for the protocol documentation (ADR-022 decision 3): when the Protobuf
+// track is chosen, exporting this IDL delivers the client contract. The engine ships only the generic envelope
+// codec (ProtobufSerializer, a hand-written minimal wire format with zero external dependencies) and no business
+// protos; business messages always ride the payload (a generic Value tree), field-for-field isomorphic with the
+// Message semantics of JsonSerializer/MsgpackSerializer.
+//
+// wire format 备注 / wire-format notes:
+//   - 字段编码遵循 protobuf 规范：tag = (field_number << 3) | wire_type 的 varint；string/bytes/子消息为
+//     length-delimited（varint 长度前缀）；double 为 fixed64 小端；int64 为 varint 二补码（负数 10 字节）；
+//     sint64 为 zigzag + varint。未知字段按规范跳过（向前兼容）。
+//   - Field encoding follows the protobuf spec: tag = varint((field_number << 3) | wire_type); string/bytes/
+//     sub-messages are length-delimited (varint length prefix); double is little-endian fixed64; int64 is a
+//     two's-complement varint (10 bytes for negatives); sint64 is zigzag + varint. Unknown fields are skipped
+//     per spec (forward compatibility).
+//   - PHP 侧映射 / PHP-side mapping:
+//       list 数组 ↔ ListValue；关联数组 ↔ Payload/MapValue；非法 UTF-8 字节串 ↔ bytes_value（合法 UTF-8 ↔
+//       string_value，与 MsgpackSerializer 的 str/bin 分流同口径）；整数数组键 ↔ sint64 int_key。
+//       list arrays ↔ ListValue; associative arrays ↔ Payload/MapValue; non-UTF-8 byte strings ↔ bytes_value
+//       (valid UTF-8 ↔ string_value, matching MsgpackSerializer's str/bin split); integer array keys ↔ sint64 int_key.
+
+syntax = "proto3";
+
+package nythros.protocol;
+
+// 协议信封：与内存态 Message（type/requestId/timestamp/payload）一一对应。
+// The protocol envelope: one-to-one with the in-memory Message (type/requestId/timestamp/payload).
+message NythrosMessage {
+  // 消息类型：login / auth / move / entity_moved / error ...（必填非空）
+  // Message type: login / auth / move / entity_moved / error ... (required, non-empty)
+  string type = 1;
+
+  // 请求-响应对应 id；通知类消息缺省（proto3 optional：缺席即 null，线上不出现该字段）
+  // Request-response correlation id; absent for notifications (proto3 optional: absence means null, the field
+  // never appears on the wire)
+  optional string request_id = 2;
+
+  // 产生时间（microtime(true)，double/fixed64 小端；编码端恒显式写出，含 0.0）
+  // Creation time (microtime(true), double/little-endian fixed64; the encoder always writes it explicitly, 0.0 included)
+  double timestamp = 3;
+
+  // 消息负载（通用 Value 树；编码端恒显式写出，空负载 = 零条目的 Payload）
+  // Message payload (generic Value tree; the encoder always writes it explicitly, an empty payload being a
+  // zero-entry Payload)
+  Payload payload = 4;
+}
+
+// 关联数组：字符串键/整数键条目列表（PHP array<string|int, mixed> 的 map 形态）。
+// Associative array: a list of string/int-keyed entries (the map shape of PHP's array<string|int, mixed>).
+message Payload {
+  repeated MapEntry entries = 1;
+}
+
+// 单个键值对：键为 oneof（字符串或整数），值为通用 Value。
+// One key-value pair: the key is a oneof (string or integer), the value a generic Value.
+message MapEntry {
+  oneof key {
+    // 字符串键 String key.
+    string string_key = 1;
+    // 整数键（zigzag 编码，负键高效） Integer key (zigzag-encoded, efficient for negatives).
+    sint64 int_key = 2;
+  }
+  // 条目值 Entry value.
+  Value value = 3;
+}
+
+// 列表：PHP list 数组的有序值序列。
+// List: an ordered sequence of values for PHP list arrays.
+message ListValue {
+  repeated Value values = 1;
+}
+
+// 通用值：覆盖协议实际用到的 PHP 类型（与 MsgpackSerializer 同口径，ext/timestamp 扩展类型不支持）。
+// Generic value: covers the PHP types the protocol actually uses (same scope as MsgpackSerializer; ext/timestamp
+// extension types are unsupported).
+message Value {
+  oneof kind {
+    // null Null.
+    NullValue null_value = 1;
+    // 布尔 Boolean.
+    bool bool_value = 2;
+    // 整数（二补码 varint） Integer (two's-complement varint).
+    int64 int_value = 3;
+    // 浮点（fixed64 小端） Float (little-endian fixed64).
+    double double_value = 4;
+    // 合法 UTF-8 字符串 Valid-UTF-8 string.
+    string string_value = 5;
+    // 非法 UTF-8 字节串（字节精确保真） Non-UTF-8 byte string (byte-exact).
+    bytes bytes_value = 6;
+    // 列表 List.
+    ListValue list_value = 7;
+    // 嵌套关联数组 Nested associative array.
+    Payload map_value = 8;
+  }
+}
+
+// 空值占位（对齐 google.protobuf.NullValue 惯例）。
+// Null placeholder (aligned with the google.protobuf.NullValue convention).
+enum NullValue {
+  NULL_VALUE = 0;
+}

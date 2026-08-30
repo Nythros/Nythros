@@ -1,0 +1,42 @@
+{
+    "name": "nythros/monorepo",
+    "type": "project",
+    "description": "Nythros 游戏引擎 Monorepo（Game engine monorepo）：nythros/engine（引擎核心）、nythros/framework（框架层）、nythros/demo（示例）。",
+    "license": "MIT",
+    "require": {
+        "php": ">=8.3",
+        "ext-redis": "*",
+        "nythros/demo": "^0.1",
+        "nythros/engine": "^0.1",
+        "nythros/framework": "^0.1",
+        "workerman/workerman": "^5.2.2"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^12",
+        "phpstan/phpstan": "^2",
+        "friendsofphp/php-cs-fixer": "^3"
+    },
+    "scripts": {
+        "cs": "php-cs-fixer fix --dry-run --diff",
+        "cs:fix": "php-cs-fixer fix",
+        "stan": "phpstan analyse --memory-limit=1G",
+        "internal": "php tools/check-internal.php --self-test && php tools/check-internal.php",
+        "api": "php tools/generate-api-docs.php --check",
+        "test": "phpunit"
+    },
+    "repositories": [
+        {
+            "type": "path",
+            "url": "packages/*",
+            "options": {
+                "versions": {
+                    "nythros/engine": "0.1.x-dev",
+                    "nythros/framework": "0.1.x-dev",
+                    "nythros/demo": "0.1.x-dev"
+                }
+            }
+        }
+    ],
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}

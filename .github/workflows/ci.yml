@@ -1,0 +1,145 @@
+# CI —— monorepo 质量门禁：PHP 8.3 + composer install + php-cs-fixer + phpstan + phpunit + benchmark 回归门禁。
+# Redis service 容器：让 RedisTokenStoreTest/RedisTeamStoreTest/GuildStoreTest/LocationStoreTest 等集成测试在 CI 真跑而非 skip。
+# MySQL service 容器：让 MySqlStorageTest 集成测试在 CI 真跑而非 skip（root 空密码，预建 nythros 库）。
+# 触发：push（main/master 主干）+ 任意 PR（含外部 PR）。
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: PHP 8.3
+    runs-on: ubuntu-latest
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_DATABASE: nythros
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: redis, pdo_mysql # 根 composer.json require ext-redis（CI 环境需显式启用）
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Code style (php-cs-fixer)
+        run: composer cs
+
+      - name: Static analysis (phpstan)
+        run: composer stan
+
+      - name: Public symbol gate (@internal, ADR-023/024)
+        run: composer internal
+
+      - name: API reference in sync (docs/api-reference.md)
+        run: composer api
+
+      - name: Tests (phpunit)
+        run: composer test
+
+      # benchmark 回归门禁（R5）：engine-bench --json 与 benchmarks/results/engine-bench.json 基线比对。
+      # 门禁只监听关键指标（tools/bench-gate.php WATCHED_METRICS）；CI 阈值放宽到 50%——基线为 WSL 实测，
+      # 跨硬件（runner vs 本机）与运行间方差实测可达 ±30%，紧阈值必然误报；50% 仍可拦截灾难性劣化
+      # （意外 O(n²)、调试残留等）。本地可用缺省 20% 做敏感自查：php tools/bench-gate.php <base> <cur>。
+      - name: Benchmark regression gate
+        run: |
+          php tools/bench-gate.php --self-test
+          php benchmarks/engine-bench.php --json > /tmp/engine-bench-current.json
+          php tools/bench-gate.php benchmarks/results/engine-bench.json /tmp/engine-bench-current.json --threshold=0.5
+
+  # 客户端 SDK 门禁：零依赖 node:test（编解码器/插值引擎/回执关联），协议回归与 PHP 侧同源。
+  client-js:
+    name: JS SDK (Node 22)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/client-js
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Tests (node:test)
+        run: npm test
+
+  # soak 冒烟门禁：2 分钟真实链路长跑（stress 波次 + RSS 斜率/认证率/帧率裁决），
+  # 守护长跑稳定性不发生灾难回归。CI 用宽松 RSS 斜率（256KB/采样，抵消冷启动 warmup）；
+  # 严格阈值留给本机小时级长跑（见 docs/performance.md §7）。
+  soak-smoke:
+    name: Soak smoke (2 min)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_DATABASE: nythros
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: redis, pdo_mysql, pcntl, posix
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Soak smoke (2 min, 10 clients)
+        run: php benchmarks/soak-map.php --minutes=2 --clients=10 --wave-seconds=25 --rss-slope=256
