@@ -1,0 +1,5 @@
+/* 放宽 Material 主题默认约 61rem 的内容宽度限制；
+   改小（如 72rem）可读性更好，改大（如 90rem）更接近全宽。 */
+.md-grid {
+  max-width: 84rem;
+}
