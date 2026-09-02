@@ -14,8 +14,32 @@ if [ ! -f vendor/autoload.php ]; then
 fi
 
 LOG_PREFIX=/tmp/nythros-skeleton-smoke
+rm -f "$LOG_PREFIX"-*.log /tmp/nythros-skeleton-client-*.pid
+
+port_busy() {
+  (exec 3<>/dev/tcp/127.0.0.1/"$1") 2>/dev/null && { exec 3<&- 3>&-; return 0; } || return 1
+}
+
+# 起始检查：端口必须空闲。上一轮服务未完全退出时端口仍被垂死实例 LISTEN，
+# 客户端会连到旧世界导致断言随机挂（连跑复现过）。给 20s 释放窗口，超时即失败。
+for p in 18081 18082; do
+  for _ in $(seq 1 40); do
+    port_busy "$p" || break
+    sleep 0.5
+  done
+  if port_busy "$p"; then
+    echo "[smoke] fatal: 端口 $p 持续被占用（上一轮服务未退出？或与其他程序冲突）"
+    exit 1
+  fi
+done
+
 cleanup() {
   [ -n "${LAUNCH_PID:-}" ] && kill -INT "$LAUNCH_PID" 2>/dev/null || true
+  # 等 launch 及其子进程真正退出，避免连跑时端口被垂死实例占住（最多 10s）
+  for _ in $(seq 1 20); do
+    kill -0 "${LAUNCH_PID:-0}" 2>/dev/null || break
+    sleep 0.5
+  done
 }
 trap cleanup EXIT
 

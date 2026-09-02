@@ -25,6 +25,12 @@ $port = isset($argv[2]) && is_numeric($argv[2]) ? (int) $argv[2] : 18081;
 // positional args like 'alice'/'18081' are outside the command set and would print usage and exit).
 $GLOBALS['argv'] = [$argv[0], 'start'];
 
+// 显式 pidFile（同 demo run-worker 的 G-5 教训）：缺省按 start_file 派生，同机并发跑多个
+// client.php（如冒烟的 bob+alice）第二个起会被 Workerman 判 "already running" 静默退出。
+// Explicit pidFile (same lesson as demo's run-worker): the default derives from start_file, so a second
+// concurrent client.php (smoke runs bob+alice) would be misdetected as "already running" and exit silently.
+Worker::$pidFile = sys_get_temp_dir() . sprintf('/nythros-skeleton-client-%s-%d.pid', $uid, getmypid());
+
 $worker = new Worker();
 $worker->onWorkerStart = static function () use ($uid, $port): void {
     $stopped = false;
