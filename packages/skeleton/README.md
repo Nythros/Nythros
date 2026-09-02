@@ -24,8 +24,8 @@ Redis 集群注册与服务发现、MySQL 归档、慢客户端背压/字节配�
 ## 5 分钟跑起来
 
 ```bash
-cd skeleton
-composer install          # monorepo 开发阶段用 path 仓库解析本地 packages/*
+composer create-project nythros/skeleton my-game   # 建项目（依赖走 Packagist）
+cd my-game
 php bin/launch.php        # 起全部频道（main#ch-1 :18081 aoi + dungeon-A#pool-1 :18082 full）
 ```
 
@@ -57,8 +57,12 @@ php client.php alice 18081
 
 源码目录 src/ 挂 Nythros\\Skeleton\\ 命名空间（composer autoload），新增类即用。
 
-## 发布形态
+## 版本与升级说明
 
-- 依赖：nythros/engine ^0.1 + nythros/framework ^0.1（正式发行后删除 repositories 的 path 段，走 Packagist）。
-- 安装：composer create-project nythros/skeleton <目录> → composer install → 直接按上文跑。
-- 本地开发：composer.json 用 path 仓库指向 ../packages/* 并模拟本地包为 0.1.0。
+- 依赖：`nythros/engine ^0.1` + `nythros/framework ^0.1`（Packagist），`composer create-project nythros/skeleton <目录>` 一步建项目。
+- 本仓库 tag 与兼容的 engine/framework 次版本对齐（`0.1.x` ↔ `^0.1`）。
+- 0.x 期间的诚实提示：`bin/` 与 `src/GameServer.php` 组装了若干引擎在 ADR-023 下标注 `@internal` 的实现类
+  （World、SimpleActorSystem、序列化器、Workerman 适配等）。这是 0.x 的组装现实，引擎次版本升级可能波及这些装配点——
+  升级时以本仓库 CI 冒烟（launch + client 全链路）为兼容底线。
+- 演进规则：engine/framework 的开发迭代不流入本仓库；只在稳定 tag 发布时同步一次。更全玩法（战斗/社交层/服务发现等）见 monorepo 的 demo。
+- 发布方式：本仓库由 [Nythros/Nythros](https://github.com/Nythros/Nythros) 的 `v*` tag subsplit 发布（ADR-019 镜像），日常开发在 monorepo `packages/skeleton` 进行；请勿直接向本仓库 `main` 提交（会被下次 tag 强推覆盖）。

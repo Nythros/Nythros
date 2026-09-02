@@ -164,6 +164,7 @@ final class GameServer extends RealtimeServer
 
             $npc = new WanderingNpc(
                 $seed['id'],
+                /** @param array{x: int, y: int} $position 移动后坐标 Post-move position. */
                 function (string $id, array $position): void {
                     $this->broadcastNpcMoved($id, $position);
                 },
@@ -176,7 +177,11 @@ final class GameServer extends RealtimeServer
         }
     }
 
-    /** NPC 移动广播：走与玩家 move 相同的视野路径。 NPC move broadcast: the same view path as player moves. */
+    /**
+     * NPC 移动广播：走与玩家 move 相同的视野路径。 NPC move broadcast: the same view path as player moves.
+     *
+     * @param array{x: int, y: int} $position 移动后坐标 Post-move position.
+     */
     private function broadcastNpcMoved(string $npcId, array $position): void
     {
         $entity = $this->entityManager->get($npcId);

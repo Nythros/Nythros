@@ -1,9 +1,10 @@
 # Release —— 打 v* tag 触发，四段流水线（ADR-019 决策 B 落地：monorepo 唯一开发源 + subsplit 发布镜像）：
 #   ① release：质量门禁（phpunit/phpstan）→ composer 打包 zip → GitHub Release（永不因发布配置缺失而失败）
-#   ② subsplit：git subtree split 把 packages/engine、packages/framework 拆到 Nythros/engine、
-#      Nythros/framework 独立仓（包 composer.json 在拆分仓根目录，Packagist 才可识别）——未配
+#   ② subsplit：git subtree split 把 packages/engine、packages/framework、packages/skeleton 拆到
+#      Nythros/engine、Nythros/framework、Nythros/skeleton 独立仓（包 composer.json 在拆分仓根目录，
+#      Packagist 才可识别）——未配
 #      SUBSPLIT_TOKEN secret 时整个 job 跳过（渐进启用，不阻塞 ①）
-#   ③ packagist：显式 POST 更新两个包的 webhook——未配 PACKAGIST_TOKEN 时跳过（若已在 Packagist
+#   ③ packagist：显式 POST 更新三个包的 webhook——未配 PACKAGIST_TOKEN 时跳过（若已在 Packagist
 #      后台为拆分仓配好 GitHub webhook，此 job 不配也无妨，双保险）
 #   ④ npm：@nythros/client 发布——未配 NPM_TOKEN 时跳过（npm org 暂不动的当前阶段即走此分支）
 # 人工前置清单见 blueprint/adr/ADR-019 §5 与 docs/deployment.md 发布节。
@@ -58,17 +59,19 @@ jobs:
           files: dist/*.zip
           generate_release_notes: true
 
-  # subsplit：tag 驱动的发布镜像。SUBSPLIT_TOKEN = 对 Nythros/engine、Nythros/framework
+  # subsplit：tag 驱动的发布镜像。SUBSPLIT_TOKEN = 对 Nythros/engine、Nythros/framework、Nythros/skeleton
   # 有 Contents:write 的 PAT（fine-grained 即可）。拆分仓必须建为空仓（不勾 README/gitignore），
   # 首推由本 job 完成；后续每次 tag 重算拆分并强制同步 main + 同名版本 tag。
+  # 注意：Nythros/skeleton 已有手工推送的历史（建仓验证），首次 subsplit tag 会 --force 覆盖之（预期内，
+  # 拆分树自此以 monorepo packages/skeleton 为唯一事实源）。
   subsplit:
-    name: Subsplit packages to Nythros/{engine,framework}
+    name: Subsplit packages to Nythros/{engine,framework,skeleton}
     runs-on: ubuntu-latest
     needs: release
     if: ${{ secrets.SUBSPLIT_TOKEN != '' }}
     strategy:
       matrix:
-        package: [engine, framework]
+        package: [engine, framework, skeleton]
     steps:
       - name: Checkout (full history for subtree split)
         uses: actions/checkout@v4
@@ -80,6 +83,19 @@ jobs:
           git config user.name "nythros-release-bot"
           git config user.email "release-bot@nythros.local"
           git subtree split -P "packages/${{ matrix.package }}" -b "subsplit-${GITHUB_REF_NAME}"
+
+      # skeleton 拆分专属：把依赖约束对齐到本次 tag 的次版本（如 v0.2.1 → ^0.2）。
+      # 拆分树里没有 monorepo path 仓库，composer.json 本就能独立解析，这里只做版本纪律，
+      # 保证「skeleton tag 与兼容的 engine/framework 次版本对齐」（Nythros/skeleton README 约定）。
+      - name: Sync skeleton dependency constraints to tag
+        if: matrix.package == 'skeleton'
+        run: |
+          git checkout "subsplit-${GITHUB_REF_NAME}"
+          MM="${GITHUB_REF_NAME#v}"; MM="${MM%.*}"
+          composer config require.nythros/engine "^${MM}"
+          composer config require.nythros/framework "^${MM}"
+          git add composer.json
+          git diff --cached --quiet || git commit -m "release: 依赖约束对齐 ${GITHUB_REF_NAME}"
 
       - name: Push mirror (main + version tag)
         run: |
@@ -103,7 +119,7 @@ jobs:
       - name: Update packages
         if: ${{ secrets.PACKAGIST_TOKEN != '' }}
         run: |
-          for pkg in engine framework; do
+          for pkg in engine framework skeleton; do
             curl -sf -X POST "https://packagist.org/api/update-package?username=${{ secrets.PACKAGIST_USERNAME }}&apiToken=${{ secrets.PACKAGIST_TOKEN }}" \
               -d "repository[url]=https://github.com/Nythros/${pkg}" \
               && echo "packagist updated: nythros/${pkg}"

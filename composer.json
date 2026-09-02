@@ -1,7 +1,7 @@
 {
     "name": "nythros/monorepo",
     "type": "project",
-    "description": "Nythros 游戏引擎 Monorepo（Game engine monorepo）：nythros/engine（引擎核心）、nythros/framework（框架层）、nythros/demo（示例）。",
+    "description": "Nythros 游戏引擎 Monorepo（Game engine monorepo）：nythros/engine（引擎核心）、nythros/framework（框架层）、nythros/demo（示例）、nythros/skeleton（create-project 入门套件，subsplit 独立发布）。",
     "license": "MIT",
     "require": {
         "php": ">=8.3",
@@ -9,6 +9,7 @@
         "nythros/demo": "^0.1",
         "nythros/engine": "^0.1",
         "nythros/framework": "^0.1",
+        "nythros/skeleton": "^0.1",
         "workerman/workerman": "^5.2.2"
     },
     "require-dev": {
@@ -22,7 +23,9 @@
         "stan": "phpstan analyse --memory-limit=1G",
         "internal": "php tools/check-internal.php --self-test && php tools/check-internal.php",
         "api": "php tools/generate-api-docs.php --check",
-        "test": "phpunit"
+        "test": "phpunit",
+        "smoke:skeleton": "bash tools/skeleton-smoke.sh packagist",
+        "smoke:skeleton:dev": "bash tools/skeleton-smoke.sh dev"
     },
     "repositories": [
         {
@@ -32,7 +35,8 @@
                 "versions": {
                     "nythros/engine": "0.1.x-dev",
                     "nythros/framework": "0.1.x-dev",
-                    "nythros/demo": "0.1.x-dev"
+                    "nythros/demo": "0.1.x-dev",
+                    "nythros/skeleton": "0.1.x-dev"
                 }
             }
         }

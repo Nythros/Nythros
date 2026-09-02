@@ -1,0 +1,3 @@
+# 统一以 LF 入库：Packagist dist 由 git archive 导出，行尾一致性影响发布物本身
+* text=auto eol=lf
+*.png binary

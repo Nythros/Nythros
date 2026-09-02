@@ -1,0 +1,19 @@
+{
+    "name": "nythros/skeleton",
+    "type": "project",
+    "description": "Nythros 入门套件（create-project 模板）：最小但功能完整的 Map 游戏服务器——两种 World（AOI 局域 / 全量广播）、认证/移动/视野广播、巡游 NPC，基于 nythros/engine + nythros/framework 开箱即用。",
+    "license": "MIT",
+    "require": {
+        "php": ">=8.3",
+        "nythros/engine": "^0.1",
+        "nythros/framework": "^0.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "Nythros\\Skeleton\\": "src/"
+        }
+    },
+    "scripts": {
+        "smoke": "bash scripts/smoke.sh"
+    }
+}

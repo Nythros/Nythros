@@ -1,0 +1,6 @@
+# Nythros skeleton —— 入门套件仓库忽略清单 / ignore rules
+/vendor/
+composer.lock
+*.log
+dump.rdb
+/tmp/

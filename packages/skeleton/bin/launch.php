@@ -5,7 +5,7 @@ declare(strict_types=1);
 // 多服务器部署启动器（入门套件版）：读 config/servers.php → 逐服务 spawn 一个 map-worker 子进程 →
 // 打印端口/pid → 前台等待并转发退出信号（SIGINT/SIGTERM 全部停止）。
 // 阶段 4 无进程监督：worker 崩溃不自动拉起（重新执行本脚本即可）。
-// Located at: skeleton/bin/launch.php — the multi-server deployment launcher (starter-kit edition).
+// Located at: bin/launch.php — the multi-server deployment launcher (starter-kit edition).
 // Reads config/servers.php → spawns one map-worker child per service → prints ports/pids → waits in the
 // foreground forwarding exit signals (SIGINT/SIGTERM stop everything). Phase-4 style: no process supervision —
 // a crashed worker is not auto-restarted (re-run this script).
@@ -138,9 +138,17 @@ if (function_exists('pcntl_signal')) {
         }
     }
 } else {
-    // 非 POSIX：无信号转发，前台等待（子进程独立存活，退出后手动清理）
-    // Non-POSIX: no signal forwarding; wait in the foreground (children live independently; clean up manually)
-    while (true) {
+    // 非 POSIX：无信号转发，前台轮询子进程状态（子进程全部退出后本脚本结束；手动清理由用户负责）
+    // Non-POSIX: no signal forwarding; poll child process status in the foreground (exits when all children exit)
+    $anyRunning = true;
+    while ($anyRunning) {
         usleep(200000);
+        $anyRunning = false;
+        foreach ($children as $entry) {
+            if (proc_get_status($entry['proc'])['running']) {
+                $anyRunning = true;
+                break;
+            }
+        }
     }
 }

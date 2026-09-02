@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "e26b554c9c68dc83627ecb84430fd075",
+    "content-hash": "6e853bca4d4f5ba026bc732f831bbebf",
     "packages": [
         {
             "name": "nythros/demo",
@@ -12,7 +12,7 @@
             "dist": {
                 "type": "path",
                 "url": "packages/demo",
-                "reference": "0629a6c645f758a2bd712b07ac695f3e174b5dc2"
+                "reference": "16c4ba303ce41275e64a2ae9faa3917c90dded6f"
             },
             "require": {
                 "nythros/engine": "^0.1",
@@ -35,7 +35,7 @@
             "dist": {
                 "type": "path",
                 "url": "packages/engine",
-                "reference": "8f5b570edc4f148295d57a1cfa2e002c42929f79"
+                "reference": "5ba0cc9226b6e742aff2e69c58625bcd78e7f567"
             },
             "require": {
                 "php": ">=8.3",
@@ -79,7 +79,7 @@
             "dist": {
                 "type": "path",
                 "url": "packages/framework",
-                "reference": "449caaafeaac09b3567f916158c8f0a8084cd07b"
+                "reference": "89b0e65a84ea1d90cdc1bfa6dcb6c853a239840c"
             },
             "require": {
                 "nythros/engine": "^0.1",
@@ -98,6 +98,38 @@
                 "MIT"
             ],
             "description": "Nythros 游戏框架层（Game framework layer）：四基类（BaseActor/BasePlayer/BaseMonster/BaseNPC）+ 战斗模块（Combat/CombatService + MonsterActor + DropEntity/DropTable + EntityTypeIndex）+ 背包（Inventory）+ 社交模块（Social/SocialService + Team/Guild/Location 存储）+ 玩家 Actor（Actor/PlayerActor）+ 身份（Auth/Identity）+ 插件机制（PluginInterface/PluginRegistry + Skill/Item/Buff 官方插件）+ 实时服务器运行时（Server/RealtimeServer + ConnectionRegistry + FrameMerger）+ 部署（Deploy/DeployConfig）+ 观测（Observability/PerfSampler）+ 持久化管道（Persistence/ArchivePipeline）。",
+            "transport-options": {
+                "relative": true
+            }
+        },
+        {
+            "name": "nythros/skeleton",
+            "version": "0.1.x-dev",
+            "dist": {
+                "type": "path",
+                "url": "packages/skeleton",
+                "reference": "32308a3d4afba5e6df5e3f8588224ae5627ab020"
+            },
+            "require": {
+                "nythros/engine": "^0.1",
+                "nythros/framework": "^0.1",
+                "php": ">=8.3"
+            },
+            "type": "project",
+            "autoload": {
+                "psr-4": {
+                    "Nythros\\Skeleton\\": "src/"
+                }
+            },
+            "scripts": {
+                "smoke": [
+                    "bash scripts/smoke.sh"
+                ]
+            },
+            "license": [
+                "MIT"
+            ],
+            "description": "Nythros 入门套件（create-project 模板）：最小但功能完整的 Map 游戏服务器——两种 World（AOI 局域 / 全量广播）、认证/移动/视野广播、巡游 NPC，基于 nythros/engine + nythros/framework 开箱即用。",
             "transport-options": {
                 "relative": true
             }
@@ -4643,13 +4675,13 @@
     ],
     "aliases": [],
     "minimum-stability": "dev",
-    "stability-flags": [],
+    "stability-flags": {},
     "prefer-stable": true,
     "prefer-lowest": false,
     "platform": {
         "php": ">=8.3",
         "ext-redis": "*"
     },
-    "platform-dev": [],
-    "plugin-api-version": "2.6.0"
+    "platform-dev": {},
+    "plugin-api-version": "2.9.0"
 }

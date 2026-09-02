@@ -6,3 +6,6 @@ parameters:
         - packages/engine/src
         - packages/framework/src
         - packages/demo/src
+        - packages/skeleton/src
+        - packages/skeleton/bin
+        - packages/skeleton/client.php

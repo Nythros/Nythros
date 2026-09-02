@@ -13,7 +13,7 @@ Nythros 是一套 **PHP 游戏服务器引擎框架**：Actor 模型 + AOI 视�
 | [`packages/framework`](packages/framework) | **nythros/framework** 开箱即用层：四基类（BasePlayer/BaseMonster/BaseNPC/BaseActor）+ Combat/Inventory/Social/Mail/Quest/Auction/Matching/Leaderboard/GM/插件机制 + `make` 脚手架 CLI | nythros/engine |
 | [`packages/demo`](packages/demo) | **nythros/demo** 参考实现：deploy.yaml 拓扑、MapServer/SocialServer 装配、玩法数据三表、verify-* 端到端验收脚本 | engine + framework |
 | [`packages/client-js`](packages/client-js) | **@nythros/client** 官方 JS SDK：二进制协议编解码、登录链路、事件订阅/回执、插值引擎、断线重连（零依赖，Node ≥22 / 浏览器通用） | — |
-| [`skeleton`](skeleton) | **nythros/skeleton** create-project 启动模板：最小可运行游戏骨架（GridAOI 主城 + 全量广播副本） | engine + framework |
+| [`packages/skeleton`](packages/skeleton) | **nythros/skeleton** create-project 入门套件：最小可运行游戏骨架（GridAOI 主城 + 全量广播副本）；由 `v*` tag subsplit 发布为 [Nythros/skeleton](https://github.com/Nythros/skeleton) 独立仓（ADR-019 镜像） | engine + framework |
 
 依赖方向铁律：`Framework → Engine`、`Demo → Framework`；引擎不知道框架层存在（见 [docs/architecture.md](docs/architecture.md) §3）。
 

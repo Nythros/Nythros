@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 // 入门套件演示客户端：连接一个 Map worker → auth → 收到 auth_ok 后发几次 move → 打印收到的帧 5 秒后退出。
 // 用法：php client.php [uid] [port]     （缺省 uid=alice port=18081）
-// Located at: skeleton/client.php — the kit's demo client: connects to a Map worker → auth → sends a few moves
+// Located at: client.php — the kit's demo client: connects to a Map worker → auth → sends a few moves
 // after auth_ok → prints received frames and exits after 5 seconds.
 // Usage: php client.php [uid] [port]    (defaults: uid=alice port=18081)
 
-require __DIR__ . '/../vendor/autoload.php';
+require __DIR__ . '/vendor/autoload.php';
 
 use Nythros\Protocol\JsonBatchSerializer;
 use Nythros\Protocol\Message;
@@ -52,7 +52,7 @@ $worker->onWorkerStart = static function () use ($uid, $port): void {
         $connection->send($serializer->encodeBatch([Message::create('auth', ['uid' => $uid])]));
         echo sprintf("[client] -> auth uid=%s\n", $uid);
     };
-    $connection->onMessage = static function (AsyncTcpConnection $connection, mixed $data) use (&$movesSent, $serializer, $stop): void {
+    $connection->onMessage = static function (AsyncTcpConnection $connection, mixed $data) use (&$movesSent, $serializer): void {
         $frames = json_decode((string) $data, true);
         if (is_array($frames) && !array_is_list($frames)) {
             $frames = [$frames]; // 单帧对象归一为列表 Normalize a single frame object into a list

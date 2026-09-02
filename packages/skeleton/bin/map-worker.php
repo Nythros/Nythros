@@ -5,7 +5,7 @@ declare(strict_types=1);
 // 单频道 Map 服务器入口（入门套件核心可执行）：--mapId + --channelId 定位 config/servers.php 里的
 // 服务条目（端口/World 类型/NPC 由配置决定，单一事实源），组装 World → WebSocket 服务器 → GameServer，
 // 50ms 世界 tick（时钟推进 + world 更新 + 帧末事件总线 flush）。
-// Located at: skeleton/bin/map-worker.php — the per-channel Map worker entry (the kit's runnable core).
+// Located at: bin/map-worker.php — the per-channel Map worker entry (the kit's runnable core).
 // --mapId + --channelId locate the service entry inside config/servers.php (port / World type / NPCs come from
 // the config — a single source of truth); assembles World → WebSocket server → GameServer and runs a 50ms
 // world tick (clock advance + world update + frame-end event-bus flush).
@@ -59,6 +59,7 @@ if ($entry === null) {
 }
 $port = $entry['port'] ?? 0;
 $worldTypeRaw = $entry['worldType'] ?? 'aoi';
+/** @var list<array{id: string, typeId: string, x: int, y: int}> $npcSeeds 出生描述由 config/servers.php 声明（改错格式属开发者可控错误） */
 $npcSeeds = is_array($entry['npc'] ?? null) ? $entry['npc'] : [];
 if (!is_int($port) || $port < 1 || $port > 65535) {
     $fail('port 必须是 1~65535 的整数');

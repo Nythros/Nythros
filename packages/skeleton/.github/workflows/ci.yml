@@ -1,0 +1,39 @@
+# CI —— skeleton 冒烟门禁：证明「5 分钟跑起来」在 Packagist 发布版本上真实成立。
+# 与 monorepo CI 不同：本仓库不跑单测/静态分析（那些跟着 engine/framework 在 monorepo 里做），
+# 只做端到端（scripts/smoke.sh，与 monorepo 本地/用户本地共用同一脚本）。
+# 注：本仓由 Nythros/Nythros 的 v* tag subsplit 发布（ADR-019 镜像），日常开发在 monorepo 进行。
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Smoke (PHP 8.3, Packagist)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pcntl, posix # Workerman 多进程启动与信号转发所需；本仓库运行路径不依赖 redis
+          coverage: none
+
+      - name: Install from Packagist
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Syntax lint
+        run: find bin src client.php -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      - name: End-to-end smoke
+        run: bash scripts/smoke.sh
