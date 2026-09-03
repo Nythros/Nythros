@@ -1,4 +1,4 @@
-# Map 频道二进制协议（阶段 2）
+# Map 频道二进制协议（v0.1 冻结）
 
 > 线上传输格式说明。帧类型/负载字段的**语义名与编码的权威字典**是业务层两枚枚举：
 > \`packages/demo/src/Protocol/FrameType.php\`（帧类型）与 \`packages/demo/src/Protocol/PayloadKey.php\`（负载字段）。

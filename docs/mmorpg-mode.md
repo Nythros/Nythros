@@ -359,7 +359,7 @@ SDK：`packages/client-js/nythros-client.js`（NythrosClient），参考示例
 ## 8. 玩法插件：Game/Horde 与 Game/Mmorpg
 
 两大玩法插件都在 `packages/framework/src/Game/`，遵循 ADR-020 §4 的「配置型插件」形态：
-framework 提供参数与规则，starter-kit（`MapChannelFactory`/`MapServer`/`RoomHub`）装配消费。
+framework 提供参数与规则，组装层（参考 demo 的 `MapChannelFactory`/`MapServer`/`RoomHub`）装配消费。
 插件本体只做一件事——经 `PluginRegistry::load` 把配置注册进 Container（`register/enable/disable/uninstall`
 四态生命周期，见 docs/plugin-guide.md）。
 
@@ -406,7 +406,7 @@ framework 提供参数与规则，starter-kit（`MapChannelFactory`/`MapServer`/
 
 ### 8.3 如何借用它们组织自己的大地图玩法
 
-1. **参数归 framework、装配归 starter-kit**：模仿 MmorpgPlugin 写一个配置型插件（构造注入你的
+1. **参数归 framework、装配归组装层（你的项目）**：模仿 MmorpgPlugin 写一个配置型插件（构造注入你的
    Config，`register` 时 `$container->set(self::CONFIG_ID, $config)`），在 `MapChannelFactory`
    加一段 env 门控装配（解析 env → 构造 config → `PluginRegistry::load` → 从 Container 取出 →
    注入 MapServer 或新服务）。
@@ -486,7 +486,7 @@ php benchmarks/stress-rooms.php --rooms=15 --seconds=25
    断连/登出 `flushId` 强制同步点 → 30s 兜底批量 `saveBatch`（`FLUSH_INTERVAL_SECONDS`）。
    直接在 move/attack 路由里写 MySQL/Redis 会击穿 6ms 预算。
 7. **把玩法参数硬编码进 framework**——framework 只放参数与规则（MmorpgConfig/ThreatRules 等），
-   env 解析与装配留 starter-kit（唯一组装点铁律）；数值进 gameplay/skills/drops 表享受热载。
+   env 解析与装配留组装层（唯一组装点铁律，demo 即 `MapChannelFactory`）；数值进 gameplay/skills/drops 表享受热载。
 8. **一个 World 服务多张图 / 一个频道多 World**——大地图水平扩展的单位是频道
    （`{mapId}#{channelId}`）；试图单进程多 World 或跨图共享实体表都会破坏迁移与扩缩容语义。
 9. **drain 后直接 kill**——draining 只挡新会话；存量玩家归零检测用

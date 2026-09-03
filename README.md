@@ -10,7 +10,7 @@ Nythros 是一套 **PHP 游戏服务器引擎框架**：Actor 模型 + AOI 视�
 | 包 | 说明 | 依赖 |
 |---|---|---|
 | [`packages/engine`](packages/engine) | **nythros/engine** 引擎核心：Contracts 契约接口（v0.1 冻结）+ 15 个核心模块实现（World/Entity/Actor/AOI/Event/Network/Protocol/Security/Persistence/Cluster/Scheduler 等） | workerman ^5.2 |
-| [`packages/framework`](packages/framework) | **nythros/framework** 开箱即用层：四基类（BasePlayer/BaseMonster/BaseNPC/BaseActor）+ Combat/Inventory/Social/Mail/Quest/Auction/Matching/Leaderboard/GM/插件机制 + `make` 脚手架 CLI | nythros/engine |
+| [`packages/framework`](packages/framework) | **nythros/framework** 开箱即用层：三基类（BasePlayer/BaseMonster/BaseNPC，继承 engine 的 `Actor\BaseActor`）+ Combat/Inventory/Social/Mail/Quest/Auction/Matching/Leaderboard/GM/插件机制 + `make` 脚手架 CLI | nythros/engine |
 | [`packages/demo`](packages/demo) | **nythros/demo** 参考实现：deploy.yaml 拓扑、MapServer/SocialServer 装配、玩法数据三表、verify-* 端到端验收脚本 | engine + framework |
 | [`packages/client-js`](packages/client-js) | **@nythros/client** 官方 JS SDK：二进制协议编解码、登录链路、事件订阅/回执、插值引擎、断线重连（零依赖，Node ≥22 / 浏览器通用） | — |
 | [`packages/skeleton`](packages/skeleton) | **nythros/skeleton** create-project 入门套件：最小可运行游戏骨架（GridAOI 主城 + 全量广播副本）；由 `v*` tag subsplit 发布为 [Nythros/skeleton](https://github.com/Nythros/skeleton) 独立仓（ADR-019 镜像） | engine + framework |
@@ -75,7 +75,7 @@ php packages/demo/bin/verify-phase5.php
 | [deployment](docs/deployment.md) | Docker 镜像、compose 部署、Prometheus 指标、生产清单 |
 | [persistence-guide](docs/persistence-guide.md) | 存储适配器、归档管线、schema 建立与迁移约定 |
 
-**设计决策与演进**：[blueprint/](blueprint/README.md) —— 架构规范、ADR 决策记录、31 篇阶段验收记录。
+**设计决策与演进**：[blueprint/](blueprint/README.md) —— 架构规范、ADR 决策记录与阶段验收/审计文档（篇目以目录为准）。
 
 ## 客户端接入
 
@@ -89,7 +89,7 @@ php packages/demo/bin/verify-phase5.php
 composer cs        # php-cs-fixer
 composer stan      # phpstan
 composer internal  # @internal 公开符号门禁（ADR-023/024）
-composer test      # phpunit（123 个测试类；集成测试需 Redis/MySQL）
+composer test      # phpunit（124 个测试类：engine 43 / framework 65 / demo 16；集成测试需 Redis/MySQL）
 php tools/generate-api-docs.php   # 校验并再生成 docs/api-reference.md
 ```
 
@@ -97,7 +97,10 @@ CI 在 push/PR 时执行以上全部 + benchmark 回归门禁（`.github/workflo
 
 ## 版本与发布
 
-版本策略与变更记录见 [CHANGELOG.md](CHANGELOG.md)；打 `v*` tag 触发 Release workflow（composer 打包 + GitHub Release + npm 发布）。
+版本策略与变更记录见 [CHANGELOG.md](CHANGELOG.md)。打 `v*` tag 触发 Release workflow（`.github/workflows/release.yml`）：
+质量门禁 → composer 打包 + GitHub Release → **subsplit 强推镜像仓**（`packages/engine|framework|skeleton` →
+Nythros/engine、Nythros/framework、Nythros/skeleton 独立仓）→ Packagist 通知 + npm 发布。
+镜像仓只读：一切开发在本 monorepo（ADR-019）。发布细节见 [部署指南](docs/deployment.md)「发布与仓库形态」节。
 
 ## 社区
 

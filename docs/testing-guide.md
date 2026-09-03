@@ -1,8 +1,8 @@
 # 测试指南（Testing Guide）
 
 > 面向读者：为 Nythros 及其上玩法编写测试的程序。读完你能：选对测试层（单测/集成/E2E/基准）、
-> 仿照仓库既有形状写出新用例、接上 CI 门禁。测试现状：123 个 PHPUnit 测试类
-> （engine 43 / framework 70 / demo 16）+ verify-* E2E 脚本族 + benchmark 回归门禁。
+> 仿照仓库既有形状写出新用例、接上 CI 门禁。测试现状：124 个 PHPUnit 测试类
+> （engine 43 / framework 65 / demo 16）+ verify-* E2E 脚本族 + benchmark 回归门禁。
 
 ## 1. 四层测试模型
 
@@ -85,7 +85,7 @@ php tools/bench-gate.php --self-test
 | 命令 | 拦什么 |
 |---|---|
 | `composer cs` | 代码风格（@PSR12 + strict_types） |
-| `composer stan` | phpstan level 8（三包 src 全量） |
+| `composer stan` | phpstan level 8（四包 src 全量，含 skeleton） |
 | `composer internal` | @internal 公开符号门禁（ADR-023/024，双向：engine 标注 + framework use 扫描） |
 | `composer api` | docs/api-reference.md 与代码一致性 |
 

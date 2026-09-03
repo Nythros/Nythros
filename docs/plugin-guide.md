@@ -7,13 +7,13 @@
 
 ## 0. 前置：插件放在哪一层
 
-三层 monorepo（`packages/engine` / `framework` / `demo`）的分工铁律（ADR-017/ADR-020）：
+monorepo 的分工铁律（ADR-017/ADR-020；PHP 包共四个——`packages/engine` / `framework` / `demo` / `skeleton`，架构分层仍是引擎/框架/组装三层）：
 
 | 层 | 放什么 | 例子 |
 |---|---|---|
 | engine | 引擎原语（AOI/Actor/调度/网络） | GridAOI、RegionScheduler |
 | framework | 玩法**机制与规则**：插件契约、官方插件、值对象、纯函数规则 | PluginInterface、SkillPlugin、MmorpgConfig |
-| demo（starter-kit） | **装配与业务动作**：你的玩法插件、频道组装、验收脚本 | AnnouncerPlugin、MapChannelFactory |
+| demo（参考实现）/ 你的游戏项目（组装层） | **装配与业务动作**：你的玩法插件、频道组装、验收脚本 | AnnouncerPlugin、MapChannelFactory |
 
 **你的业务插件写应用层**（如 `packages/demo/src/Plugin/`），依赖 framework 的契约而非实现——
 这样框架升级时插件面稳定。反过来，framework 侧的官方插件（Skill/Item/Buff/Mmorpg/Horde）是
@@ -67,7 +67,7 @@ final class SkillPlugin implements PluginInterface
 ### 2.2 配置型：注册一份玩法参数（MmorpgPlugin 范式）
 
 Mmorpg 插件是「配置型插件」样板——插件本体只做一件事：把玩法配置以约定 id 注册进 Container，
-starter-kit 组装层解析后注入消费方（MapServer 的威胁表/重生器接线）：
+组装层（参考 demo）解析后注入消费方（MapServer 的威胁表/重生器接线）：
 
 ```php
 final class MmorpgPlugin implements PluginInterface
@@ -171,7 +171,7 @@ public function uninstall(ContainerInterface $container, EventDispatcherInterfac
 }
 ```
 
-**第 5 步 · 装配接线**：在 starter-kit 组装层（`MapChannelFactory::attachChannel`）load + enable：
+**第 5 步 · 装配接线**：在组装层（参考 demo 的 `MapChannelFactory::attachChannel`）load + enable：
 
 ```php
 $pluginRegistry->load(new AnnouncerPlugin(), $container, $dispatcher);
@@ -226,7 +226,7 @@ php packages/demo/bin/verify-mmorpg.php     # 期望 RESULT: PASSED (PASS=11 FAI
 
 - 脚本本体是一个 Workerman `Worker`（`onWorkerStart` 里驱动步骤状态机），经
   `AsyncTcpConnection` 连 gateway(18285，JSON 文本) 登录拿 token → 连 Map(18081，二进制批量，
-  编解码用 `bin/lib/map-codec.php`) 发 auth；
+  编解码用 `packages/demo/bin/lib/map-codec.php`) 发 auth；
 - 步骤 = 注册到 `$steps` 表的 `[名称, 处理函数, 超时秒]`，处理函数用 `waitMapFrame`（事件驱动、
   非阻塞）推进相位，断言用 `check(bool, 描述)` 汇总，`closeStep('PASS'|'FAIL', 摘要)` 收步；
 - 断言尽量读**服务器权威帧**（quest:rows/combat:hit 等），对位移/时序敏感的步骤先发探针请求

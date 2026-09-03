@@ -212,9 +212,9 @@ final class MonsterActor extends BaseMonster
 }
 ```
 
-### 4.2 实现钩子（参照 demo 现成实现）
+### 4.2 实现钩子（参照框架层现成实现）
 
-参照 `packages/demo/src/Combat/MonsterActor.php` 与 `packages/demo/src/PlayerActor.php`，它们是基类钩子的完整参考实现。
+参照 `packages/framework/src/Actor/PlayerActor.php` 与 `packages/framework/src/Combat/MonsterActor.php`，它们是基类钩子的完整参考实现。
 
 怪物核心（`MonsterActor`）：
 

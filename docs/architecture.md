@@ -8,8 +8,8 @@
 Demo（组装 + 游戏示例）
   └─ nythros/demo：deploy.yaml 拓扑、SocialServer 社交装配、MapServer、Protocol、怪物/掉落示例
 
-Framework（四基类 + 业务模块 + 插件 + 脚手架）
-  └─ nythros/framework：BaseActor/BasePlayer/BaseMonster/BaseNPC + Damageable + Combat/Inventory/Social/Actor/Auth 模块 + Plugin + make CLI
+Framework（三基类 + 业务模块 + 插件 + 脚手架）
+  └─ nythros/framework：BasePlayer/BaseMonster/BaseNPC（继承 engine 的 Actor\BaseActor）+ Damageable + Combat/Inventory/Social/Actor/Auth 模块 + Plugin + make CLI
 
 Engine（契约 + 核心实现）
   └─ nythros/engine：Contracts 接口 + 内核/世界/实体/Actor/AOI/事件/网络/协议/安全/持久化/集群实现
@@ -23,7 +23,8 @@ Engine（契约 + 核心实现）
 
 ### 1.2 Framework：开箱即用层
 
-- 四个基类：`BaseActor`（绑实体 + 抽象 update）、`BasePlayer`（连接/uid/血量 + 钩子）、`BaseMonster`（AI 状态机 + 钩子）、`BaseNPC`（静态实体 + 交互）。
+- Actor 基座在 engine：`BaseActor`（绑实体 + 抽象 update）；framework 在其上给三个基类：
+  `BasePlayer`（连接/uid/血量 + 钩子）、`BaseMonster`（AI 状态机 + 钩子）、`BaseNPC`（静态实体 + 交互）。
 - 战斗契约 `Damageable`：玩家与怪物共同实现的最小战斗面（hp / maxHp / takeDamage / heal / isDead），使战斗服务以统一签名承载双向攻击。
 - 业务模块（ADR-020 §3.1 上移）：`Combat`（CombatService/MonsterActor/掉落）、`Inventory`、`Social`（SocialService/ConnectionHub/TeamStore/GuildStore/LocationStore）、`Actor`（PlayerActor）、`Auth`（Identity）。
 - 插件机制 `Nythros\Framework\Plugin`：官方插件（Skill / Item / Buff）经 `PluginRegistry::load` 走 register → enable 生命周期，数据定义经 Container 注入。

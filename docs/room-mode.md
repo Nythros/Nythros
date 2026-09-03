@@ -42,13 +42,13 @@ Nythros 支持两种玩法形态（`docs/mmorpg-mode.md` §1 有部署侧对比�
 | `RoomConfig` / `RoomState` | `packages/engine/src/Contracts/RoomConfig.php`、`RoomState.php` | engine 契约 | 房间配置值对象（`roomId`/`periodMs`/`maxMembers`/`aoiFactory`/`maxCatchUpTicks`）；生命周期枚举 `Created`→`Running`→`Settled`→`Closed` |
 | `MatchingService` | `packages/framework/src/Matching/MatchingService.php` | framework | 匹配队列/撮合/开房编排；`registerCriteria`/`enqueue`/`cancel`/`tick`/`purgeOffline` |
 | `MatchCriteria` / `MatchTicket` / `MatchJoinHandlerInterface` | 同目录 | framework | 撮合条件（`teamSize`/等级区间/开房参数）；排队票值对象；入房编排委托契约 |
-| `RoomHub` | `packages/demo/src/RoomHub.php` | starter-kit（demo） | `room:*` 路由编排中枢：建房、`admitPlayer` transfer 全链、刷怪/AoE、settle/close、归属与成员闸门 |
-| `RoomVisionBroadcaster` | `packages/demo/src/RoomVisionBroadcaster.php` | starter-kit | 房间视野广播器：定视野用房间自有 AOI，投递复用宿主 `MapServer::sendToEntity`（`VisionBroadcasterInterface` 门面） |
-| `MatchJoinOrchestrator` | `packages/demo/src/MatchJoinOrchestrator.php` | starter-kit | `MatchJoinHandlerInterface` 实现：撮合成功者走 `RoomHub::admitPlayer`，失败转 false 由撮合侧重排 |
+| `RoomHub` | `packages/demo/src/RoomHub.php` | demo（参考实现·组装层） | `room:*` 路由编排中枢：建房、`admitPlayer` transfer 全链、刷怪/AoE、settle/close、归属与成员闸门 |
+| `RoomVisionBroadcaster` | `packages/demo/src/RoomVisionBroadcaster.php` | demo（参考实现·组装层） | 房间视野广播器：定视野用房间自有 AOI，投递复用宿主 `MapServer::sendToEntity`（`VisionBroadcasterInterface` 门面） |
+| `MatchJoinOrchestrator` | `packages/demo/src/MatchJoinOrchestrator.php` | demo（参考实现·组装层） | `MatchJoinHandlerInterface` 实现：撮合成功者走 `RoomHub::admitPlayer`，失败转 false 由撮合侧重排 |
 
 分层铁律：framework 的 `MatchingService` 只依赖 `RoomManagerInterface` 契约与 `MatchJoinHandlerInterface`
 委托，不感知 demo `RoomHub` 与 engine AOI 实现；所有组装（AOI 工厂闭包、Horde 配置、宿主总线）只发生在
-starter-kit 装配点 `packages/demo/src/MapChannelFactory.php`（唯一组装点规则）。
+demo 的装配点 `packages/demo/src/MapChannelFactory.php`（唯一组装点规则；你的游戏项目的组装层同理）。
 
 ```mermaid
 flowchart LR
@@ -174,11 +174,11 @@ php vendor/bin/make make:event RoomSettled --out=packages/demo/src/Game
 ```
 
 可用命令共四类：`make:actor` / `make:skill` / `make:event` / `make:map`（`make:map` 面向大地图拓扑，
-房间制一般用不到）。骨架带 TODO 注释，参照 `packages/demo/src/Combat/MonsterActor.php` 实现钩子。
+房间制一般用不到）。骨架带 TODO 注释，参照 `packages/framework/src/Combat/MonsterActor.php` 实现钩子。
 
 ### 4.3 写玩法逻辑（唯一组装点）
 
-新增房间玩法逻辑时**只改 starter-kit 组装层与 `RoomHub` 同类编排**，不要往 engine/framework 塞玩法：
+新增房间玩法逻辑时**只改你的游戏项目的组装层（参考 demo 的 `RoomHub` 同类编排）**，不要往 engine/framework 塞玩法：
 
 1. 房间参数（tick 周期/成员上限/刷怪波次/AoE 半径上限）由 Horde 插件注册进 Container 的
    `HordeConfig` 提供（`NYTHROS_ROOMS` 分支解析后注入 `RoomHub` 构造器）；换玩法即换配置/插件。
@@ -323,8 +323,8 @@ nohup php packages/demo/bin/run-worker.php --service=map --mapId=map-1 --channel
 
 ## 8. 反模式清单
 
-1. **往 framework/engine 塞玩法**：组装（AOI 工厂、Horde 配置、编排路由）只允许发生在 starter-kit
-   唯一组装点；framework 的 `MatchingService` 只依赖契约。
+1. **往 framework/engine 塞玩法**：组装（AOI 工厂、Horde 配置、编排路由）只允许发生在你的项目的组装层
+   （demo 的铁律即唯一组装点 `MapChannelFactory`）；framework 的 `MatchingService` 只依赖契约。
 2. **先摘除后广播**：入房必须先向世界视野邻居广播 `entity_leave` 再摘世界登记（G1 时序，
    `RoomHub::admitPlayer`）；反过来摘除后世界 AOI/EM 已无此实体，无从补发。
 3. **transfer 成功前触碰容器维度**：`moveEntityToContainer` 必须在 `transfer` 成功之后

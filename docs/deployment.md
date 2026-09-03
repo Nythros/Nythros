@@ -86,8 +86,8 @@ scrape_configs:
 Map 是有状态进程（一频道一进程一 World），**禁止原地 reload**；标准流程：
 
 ```bash
-php packages/demo/bin/map-rolling.php mark-stopping --channel=map-1#ch-1   # 旧实例标记 stopping
-php packages/demo/bin/map-rolling.php watch --channel=map-1#ch-1           # 等 playerCount 归零
+php packages/demo/bin/map-rolling.php mark-stopping map-1#ch-1   # 旧实例标记 stopping
+php packages/demo/bin/map-rolling.php watch map-1#ch-1           # 等 playerCount 归零（可选 --timeout=600）
 # 社交层 discover 已过滤 stopping 实例（不分配新玩家）→ 旧实例自然退出 → 启动新实例
 ```
 

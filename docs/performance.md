@@ -44,7 +44,7 @@
 | \`eventbus.dropped_total\` | SimpleEventBus::flush() | 队列拥塞丢弃（可靠事件不丢；droppable 丢弃计数） |
 | \`network.out_bytes\` / \`out_packets\` / \`batch_packets\` | WorkermanConnection::sendBatch | 出站字节/包/批量包大小分布 |
 
-### 3.2 采样器（\`packages/demo/src/PerfSampler.php\`）
+### 3.2 采样器（\`packages/framework/src/Observability/PerfSampler.php\`）
 
 \`run-worker.php\` 在 \`onWorkerStart\` 注册：每 5s \`PerfProbe::drain()\` → 快照写 Redis。
 

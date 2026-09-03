@@ -1,7 +1,7 @@
 {
     "name": "nythros/framework",
     "type": "library",
-    "description": "Nythros 游戏框架层（Game framework layer）：四基类（BaseActor/BasePlayer/BaseMonster/BaseNPC）+ 战斗模块（Combat/CombatService + MonsterActor + DropEntity/DropTable + EntityTypeIndex）+ 背包（Inventory）+ 社交模块（Social/SocialService + Team/Guild/Location 存储）+ 玩家 Actor（Actor/PlayerActor）+ 身份（Auth/Identity）+ 插件机制（PluginInterface/PluginRegistry + Skill/Item/Buff 官方插件）+ 实时服务器运行时（Server/RealtimeServer + ConnectionRegistry + FrameMerger）+ 部署（Deploy/DeployConfig）+ 观测（Observability/PerfSampler）+ 持久化管道（Persistence/ArchivePipeline）。",
+    "description": "Nythros 游戏框架层（Game framework layer）：三基类（BasePlayer/BaseMonster/BaseNPC，继承 engine 的 Actor\\BaseActor）+ 战斗模块（Combat/CombatService + MonsterActor + DropEntity/DropTable + EntityTypeIndex）+ 背包（Inventory）+ 社交模块（Social/SocialService + Team/Guild/Location 存储）+ 玩家 Actor（Actor/PlayerActor）+ 身份（Auth/Identity）+ 插件机制（PluginInterface/PluginRegistry + Skill/Item/Buff 官方插件）+ 实时服务器运行时（Server/RealtimeServer + ConnectionRegistry + FrameMerger）+ 部署（Deploy/DeployConfig）+ 观测（Observability/PerfSampler）+ 持久化管道（Persistence/ArchivePipeline）。",
     "license": "MIT",
     "require": {
         "php": ">=8.3",

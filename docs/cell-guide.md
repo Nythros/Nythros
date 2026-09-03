@@ -185,7 +185,7 @@ $payload = [
 
 > 注意：移动帧 `entity_moved` 不走 AOI 差分，而是 `handleMove` 里按新坐标 `aoi->query` 直接广播；`entity_enter/entity_leave` 才走 World::update 的差分信封。客户端无需区分移动来源（无 move 回执，以广播为准）。
 
-> 传输层（阶段 2 二进制协议）：帧类型与 payload 字段名只是「语义名」——线上传输经 BinaryBatchSerializer 压缩为
+> 传输层（二进制协议，v0.1 冻结）：帧类型与 payload 字段名只是「语义名」——线上传输经 BinaryBatchSerializer 压缩为
 > 枚举编码（packages/demo/src/Protocol/FrameType.php 与 PayloadKey.php 是权威字典，编码一经发布不得复用），
 > 且出站以「一包多帧」批量包下发（每连接每帧一次网络写入）。批量包布局见 docs/protocol.md。
 > Transport (phase-2 binary protocol): frame types and payload keys are semantic names — on the wire the

@@ -51,9 +51,12 @@ php client.php alice 18081
 ## 接入你自己的游戏（三处就位）
 
 1. **加频道/改 NPC**：改 config/servers.php（新增一个条目即可，世界类型/端口/NPC 全在这里）。
-2. **加玩法**：继承 BasePlayer / BaseMonster / BaseNPC 写你的 Actor（参考 src/Actor/；
-   也可用 php vendor/bin/make make:actor ... 脚手架生成）。
+2. **加玩法**：继承 BasePlayer / BaseNPC 写你的 Actor（本包 src/Actor/ 已有两个示例；BaseMonster 无示例，
+   参考框架层 packages/framework 的 Combat/MonsterActor，或用 php vendor/bin/make make:actor ... 脚手架生成）。
 3. **加协议帧**：在 GameServer::dispatchSafe 的 switch 里加一个 case，业务逻辑放 handle* 方法。
+
+逐步成长教程（认证→战斗→社交→集群，每一阶打通 demo 的一个功能语义）见主站文档
+[Nythros 文档站 · 成长教程](https://nythros.github.io/Nythros/growth/00-roadmap/)。
 
 源码目录 src/ 挂 Nythros\\Skeleton\\ 命名空间（composer autoload），新增类即用。
 
