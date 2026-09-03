@@ -10,12 +10,12 @@ use Nythros\Framework\Plugin\PluginInterface;
 
 /**
  * Horde 插件（R4 类型模块试点，ADR-020 §4「命名空间 + PluginRegistry 插件形态」）：
- * 向 Container 注册 horde 配置（'horde.config'，缺省 HordeConfig::default()），供 starter-kit
- * 组装层解析后注入 RoomHub/MapServer——玩法参数归 framework，装配归 starter-kit。
+ * 向 Container 注册 horde 配置（'horde.config'，缺省 HordeConfig::default()），供
+ * 组装层解析后注入 RoomHub/MapServer——玩法参数归 framework，装配归组装层。
  * The horde plugin (the R4 type-module pilot, ADR-020 §4's "namespace + PluginRegistry plugin form"):
  * registers the horde config ('horde.config', defaulting to HordeConfig::default()) into the Container for the
- * starter-kit assembly layer to resolve into RoomHub/MapServer — gameplay parameters live in the framework,
- * assembly in the starter kit.
+ * the assembly layer to resolve into RoomHub/MapServer — gameplay parameters live in the framework,
+ * assembly in the assembly layer.
  */
 final class HordePlugin implements PluginInterface
 {

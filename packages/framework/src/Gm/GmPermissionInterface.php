@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace Nythros\Framework\Gm;
 
 /**
- * GM 权限检查契约：uid 是否有权执行某命令（framework 只定义接口，身份实现留守 starter-kit——
+ * GM 权限检查契约：uid 是否有权执行某命令（framework 只定义接口，身份实现留在组装层——
  * 典型形态为 StaticAuthenticator 侧的白名单扩展占位）。
  * GM permission-check contract: whether a uid may run a command (framework defines the interface only; the
- * identity implementation stays in starter-kit — typically a whitelist extension placeholder beside
+ * identity implementation stays in the assembly layer — typically a whitelist extension placeholder beside
  * StaticAuthenticator).
  */
 interface GmPermissionInterface

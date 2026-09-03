@@ -8,12 +8,12 @@ namespace Nythros\Framework\Game\Mmorpg;
  * 世界怪物重生器（R4 mmorpg 类型模块试点）：死亡登记 → 定时重生回锚点的纯调度组件——
  * registerDeath 记录怪物 id 与重生时刻（now + respawnMs），due 返回到期可重生的怪物 id 列表，
  * 实际重生动作（spawnMonster 回锚点）由装配层（MapServer）执行。framework 提供调度规则，
- * starter-kit 装配消费。
+ * 组装层装配消费。
  * The world monster respawner (the R4 mmorpg type-module pilot): a pure scheduling component for
  * death-registration → timed respawn back to the anchor — registerDeath records the monster id and its respawn
  * instant (now + respawnMs), due returns the ids whose respawn is due, and the actual respawn action
  * (spawnMonster back to the anchor) is executed by the assembly layer (MapServer). The framework owns the
- * scheduling rule, the starter kit assembles and consumes it.
+ * scheduling rule, the assembly layer assembles and consumes it.
  */
 final class Respawner
 {

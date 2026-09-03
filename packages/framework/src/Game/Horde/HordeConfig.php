@@ -7,11 +7,11 @@ namespace Nythros\Framework\Game\Horde;
 /**
  * horde 玩法参数化配置（R4 类型模块试点，ADR-020 §4）：波次刷怪定义、房间容量与 tick 周期、
  * AoE 半径上限、掉落风暴配置、出生保护参数与结算规则的只读聚合——framework 提供参数与规则，
- * starter-kit（RoomHub/MapChannelFactory）装配消费。::default() 与既有 demo 常量逐值对齐
+ * 组装层（RoomHub/MapChannelFactory）装配消费。::default() 与既有 demo 常量逐值对齐
  * （迁移期行为零变化）。
  * Horde gameplay parameterization (the R4 type-module pilot, ADR-020 §4): a readonly aggregate of wave spawn
  * definitions, room capacity and tick period, the AoE radius cap, drop-storm config, spawn-protection parameters
- * and settlement rules — the framework provides parameters and rules, the starter kit (RoomHub /
+ * and settlement rules — the framework provides parameters and rules, the assembly layer (RoomHub /
  * MapChannelFactory) assembles and consumes them. ::default() aligns value-for-value with the former demo
  * constants (zero behavior change through the migration).
  */

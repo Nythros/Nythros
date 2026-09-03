@@ -59,7 +59,7 @@ final class MatchingService
 
     /**
      * @param RoomManagerInterface $rooms 房间管理器契约（开房唯一入口） The room-manager contract (the sole room-building entry).
-     * @param MatchJoinHandlerInterface $joinHandler 入房编排委托（starter-kit 实现） The join-orchestration delegate (implemented by starter-kit).
+     * @param MatchJoinHandlerInterface $joinHandler 入房编排委托（组装层实现） The join-orchestration delegate (implemented by the assembly layer).
      * @param \Closure(): mixed $roomAoiFactory 房间 AOI 工厂闭包（组装层注入，透传 RoomConfig） The room-AOI factory closure (injected by the assembly layer, passed through to RoomConfig).
      */
     public function __construct(

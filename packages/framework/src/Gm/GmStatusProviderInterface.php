@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace Nythros\Framework\Gm;
 
 /**
- * GM 服务状态源契约（starter-kit 实现接口、framework 消费）：status 命令的数据来源，
+ * GM 服务状态源契约（组装层实现接口、framework 消费）：status 命令的数据来源，
  * 返回键值对集合（值须为标量，便于协议回执与日志直出）。
- * The GM status-source contract (starter-kit implements the interface, framework consumes it): the data source
+ * The GM status-source contract (the assembly layer implements the interface, framework consumes it): the data source
  * of the status command, returning key-value pairs (values must be scalar so receipts and logs can carry them).
  */
 interface GmStatusProviderInterface

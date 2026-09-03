@@ -10,14 +10,14 @@ use Nythros\Framework\Quest\QuestChain;
  * mmorpg 玩法参数化配置（R4 类型模块试点，ADR-020 §4）：威胁/仇恨参数组（aggroRange 进入仇恨列表距离、
  * threatDecayPerSec 每秒衰减、tauntMultiplier 嘲讽倍率、maxThreat 威胁上限）、世界怪物重生参数组
  * （respawnMs 死亡后重生延迟、spawnDensity 重生密度）与任务链配置（questChains，Quest 子系统消费）的只读聚合——
- * framework 提供参数与规则，starter-kit（MapChannelFactory/MapServer）装配消费。::default() 提供
+ * framework 提供参数与规则，组装层（MapChannelFactory/MapServer）装配消费。::default() 提供
  * mmorpg 开关开启时的缺省参数（威胁不衰减、无上限、5s 重生，与既有世界侧行为对齐）。
  * The mmorpg gameplay parameterization (the R4 type-module pilot, ADR-020 §4): a readonly aggregate of the
  * threat/hate parameter group (aggroRange — the distance to enter the hate list, threatDecayPerSec — decay per
  * second, tauntMultiplier — the taunt multiplier, maxThreat — the threat cap), the world monster-respawn
  * parameter group (respawnMs — the death-to-respawn delay, spawnDensity — the respawn density) and the quest-chain
  * configuration (questChains, consumed by the Quest subsystem) — the framework provides parameters and rules, the
- * starter kit (MapChannelFactory/MapServer) assembles and consumes them. ::default() supplies the defaults for
+ * assembly layer (MapChannelFactory/MapServer) assembles and consumes them. ::default() supplies the defaults for
  * when the mmorpg switch is on (no threat decay, no cap, 5s respawn — aligned with the existing world-side behavior).
  */
 final class MmorpgConfig

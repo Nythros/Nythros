@@ -60,7 +60,7 @@ final class RoomInstanceManager implements RoomManagerInterface
      *
      * @param null|callable(): float $clock 可选时钟注入（缺省 microtime(true)），用于预算耗时实测 Optional clock injection (defaults to microtime(true)), used to measure budget consumption.
      * @param float $budgetMs 单次 tick 预算（毫秒），缺省 30ms Per-tick budget in milliseconds, default 30ms.
-     * @param null|EventBusInterface $eventBus 共享宿主总线（缺省自建 SimpleEventBus；starter-kit 接线时注入宿主总线） Shared host bus (defaults to a fresh SimpleEventBus; the starter-kit wiring injects the host bus).
+     * @param null|EventBusInterface $eventBus 共享宿主总线（缺省自建 SimpleEventBus；组装层 接线时注入宿主总线） Shared host bus (defaults to a fresh SimpleEventBus; the assembly-layer wiring injects the host bus).
      */
     public function __construct(
         ?callable $clock = null,

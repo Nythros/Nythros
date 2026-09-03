@@ -8,11 +8,11 @@ namespace Nythros\Framework\Gm;
  * GM 命令契约：最小内核的命令单元——名字 + 执行。
  * GM command contract: the minimal kernel's command unit — a name plus an execution.
  *
- * 身份与权限不在此处：白名单/角色判定由 GmPermissionInterface 承担（starter-kit 实现身份侧，
- * framework 只提供能力，ADR 裁决「GM 白名单留守 starter-kit」）。
+ * 身份与权限不在此处：白名单/角色判定由 GmPermissionInterface 承担（组装层实现身份侧，
+ * framework 只提供能力，ADR 裁决「GM 白名单留在组装层」）。
  * Identity and permission live elsewhere: whitelist/role verdicts belong to GmPermissionInterface (the
- * starter-kit implements the identity side; framework provides capability only, per the ruling that the
- * GM whitelist stays in starter-kit).
+ * the assembly layer implements the identity side; framework provides capability only, per the ruling that the
+ * GM whitelist stays in the assembly layer).
  */
 interface GmCommandInterface
 {

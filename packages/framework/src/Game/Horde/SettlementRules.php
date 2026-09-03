@@ -6,9 +6,9 @@ namespace Nythros\Framework\Game\Horde;
 
 /**
  * 房间结算规则（R4 horde 类型模块试点）：以刷怪/击杀计数纯函数判定结算结论——
- * framework 提供规则，starter-kit 装配（击杀计数可由 combat.kill 埋点事件驱动）。
+ * framework 提供规则，组装层装配（击杀计数可由 combat.kill 埋点事件驱动）。
  * Room settlement rules (the R4 horde type-module pilot): a pure-function verdict from spawn/kill counts —
- * the framework owns the rule, the starter kit assembles it (kill counts can be driven by the combat.kill instrumentation event).
+ * the framework owns the rule, the assembly layer assembles it (kill counts can be driven by the combat.kill instrumentation event).
  */
 final class SettlementRules
 {

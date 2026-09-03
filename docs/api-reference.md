@@ -1009,7 +1009,7 @@ Mmorpg 插件（R4 类型模块试点，ADR-020 §4「命名空间 + PluginRegis
 ### `Nythros\Framework\Gm`
 
 #### `Nythros\Framework\Gm\GmBroadcasterInterface`
-GM 全服广播能力契约（starter-kit 实现接口、framework 消费——VisionBroadcasterInterface 倒置先例）：
+GM 全服广播能力契约（组装层实现接口、framework 消费——VisionBroadcasterInterface 倒置先例）：
 
 | 方法 | 说明 |
 |---|---|
@@ -1041,14 +1041,14 @@ drain 命令的能力契约（P16 动态扩缩容）：由服务实现（MapServ
 | `isDraining(): bool` | 是否处于 draining（观测口）。 |
 
 #### `Nythros\Framework\Gm\GmKickerInterface`
-GM 踢人能力契约（starter-kit 实现接口、framework 消费）：按 uid 断开其全部在线连接，
+GM 踢人能力契约（组装层实现接口、framework 消费）：按 uid 断开其全部在线连接，
 
 | 方法 | 说明 |
 |---|---|
 | `kick(string $uid): int` | 踢指定 uid 下线，返回实际断开的连接数（不在线返回 0）。 |
 
 #### `Nythros\Framework\Gm\GmPermissionInterface`
-GM 权限检查契约：uid 是否有权执行某命令（framework 只定义接口，身份实现留守 starter-kit——
+GM 权限检查契约：uid 是否有权执行某命令（framework 只定义接口，身份实现留在组装层——
 
 | 方法 | 说明 |
 |---|---|
@@ -1065,7 +1065,7 @@ GM 命令结果：四态结构化回执（ok / unknown_command / permission_deni
 | `static` `unknownCommand(string $name): self` |  |
 
 #### `Nythros\Framework\Gm\GmStatusProviderInterface`
-GM 服务状态源契约（starter-kit 实现接口、framework 消费）：status 命令的数据来源，
+GM 服务状态源契约（组装层实现接口、framework 消费）：status 命令的数据来源，
 
 | 方法 | 说明 |
 |---|---|
@@ -1249,7 +1249,7 @@ make:skill — 生成技能定义条目并追加到技能配置（config/skills.
 | `admits(int $level): bool` | 候选者等级是否满足准入区间（含边界）。 |
 
 #### `Nythros\Framework\Matching\MatchJoinHandlerInterface`
-匹配入房编排委托契约（framework → starter-kit 依赖倒置）：撮合成功后把一名候选者编排进指定房间。
+匹配入房编排委托契约（framework → assembly layer 依赖倒置）：撮合成功后把一名候选者编排进指定房间。
 
 | 方法 | 说明 |
 |---|---|

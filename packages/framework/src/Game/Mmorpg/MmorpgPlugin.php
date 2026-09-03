@@ -10,12 +10,12 @@ use Nythros\Framework\Plugin\PluginInterface;
 
 /**
  * Mmorpg 插件（R4 类型模块试点，ADR-020 §4「命名空间 + PluginRegistry 插件形态」）：
- * 向 Container 注册 mmorpg 配置（'mmorpg.config'，缺省 MmorpgConfig::default()），供 starter-kit
- * 组装层解析后注入 MapServer——玩法参数归 framework，装配归 starter-kit。
+ * 向 Container 注册 mmorpg 配置（'mmorpg.config'，缺省 MmorpgConfig::default()），供
+ * 组装层解析后注入 MapServer——玩法参数归 framework，装配归组装层。
  * The mmorpg plugin (the R4 type-module pilot, ADR-020 §4's "namespace + PluginRegistry plugin form"):
  * registers the mmorpg config ('mmorpg.config', defaulting to MmorpgConfig::default()) into the Container for the
- * starter-kit assembly layer to resolve into MapServer — gameplay parameters live in the framework,
- * assembly in the starter kit.
+ * the assembly layer to resolve into MapServer — gameplay parameters live in the framework,
+ * assembly in the assembly layer.
  */
 final class MmorpgPlugin implements PluginInterface
 {

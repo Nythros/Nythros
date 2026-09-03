@@ -7,10 +7,10 @@ namespace Nythros\Framework\Game\Mmorpg;
 /**
  * 威胁/仇恨规则（R4 mmorpg 类型模块试点）：纯函数集合——aggro 选择（最高威胁者）、衰减计算
  * （threat - decay × dt，钳制非负）、嘲讽倍率应用与威胁上限钳制。framework 提供规则，
- * starter-kit 装配（ThreatTable 状态组件持有本规则实例）。
+ * 组装层装配（ThreatTable 状态组件持有本规则实例）。
  * Threat/hate rules (the R4 mmorpg type-module pilot): a pure-function set — aggro selection (the highest threat),
  * decay computation (threat - decay × dt, clamped non-negative), taunt-multiplier application and the threat-cap
- * clamp. The framework owns the rules, the starter kit assembles them (the ThreatTable state component holds a
+ * clamp. The framework owns the rules, the assembly layer assembles them (the ThreatTable state component holds a
  * rules instance).
  */
 final class ThreatRules
