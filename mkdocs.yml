@@ -42,6 +42,18 @@ nav:
       - 快速启动: quick-start.md
       - 架构总览: architecture.md
       - 线协议: protocol.md
+  - 成长教程（从入门套件到 demo）:
+      - 总览与路线图: growth/00-roadmap.md
+      - "01 认证（token 签发/消费）": growth/01-token-auth.md
+      - "02 战斗（attack/技能/掉落）": growth/02-combat.md
+      - "03 背包与持久化": growth/03-inventory-persistence.md
+      - "04 聊天": growth/04-chat.md
+      - "05 组队与帮派": growth/05-team-guild.md
+      - "06 匹配与房间": growth/06-matching-rooms.md
+      - "07 经济（邮件/交易行/钱包）": growth/07-economy.md
+      - "08 GM 与反作弊": growth/08-gm-anticheat.md
+      - "09 插件系统": growth/09-plugin.md
+      - "10 集群扩展": growth/10-scale-out.md
   - 核心机制:
       - Actor 指南: actor-guide.md
       - AOI / 视野: cell-guide.md

@@ -47,6 +47,7 @@ php packages/demo/bin/verify-phase5.php   # 末行 RESULT: PASS 即链路通
 | 我想… | 去看 |
 |---|---|
 | 把服务器跑起来 | [快速启动](quick-start.md) |
+| **从入门套件一步步做出完整游戏**（战斗/社交/经济/集群，每章可运行验收） | [成长教程 · 路线图](growth/00-roadmap.md) |
 | 理解整体结构与服务拓扑 | [架构总览](architecture.md) |
 | 写业务 Actor / 玩法插件 | [Actor 指南](actor-guide.md) · [插件机制](plugin-guide.md) |
 | 做房间制游戏（匹配/开局/结算） | [房间制玩法](room-mode.md) |
