@@ -49,7 +49,7 @@ php packages/demo/bin/verify-phase5.php
 
 | 文档 | 内容 |
 |---|---|
-| [actor-guide](docs/actor-guide.md) | Actor 模型、四基类、模板方法钩子、make 脚手架 |
+| [actor-guide](docs/actor-guide.md) | Actor 模型、三基类（+ engine BaseActor）、模板方法钩子、make 脚手架 |
 | [cell-guide](docs/cell-guide.md) | AOI 概念、GridAOI 空间索引、视野 enter/leave |
 | [state-sync](docs/state-sync.md) | 服务端权威、STATE/EVENT 帧语义、插值策略、快照重同步 |
 | [plugin-guide](docs/plugin-guide.md) | 插件生命周期、仓库型/配置型插件、五步教程 |

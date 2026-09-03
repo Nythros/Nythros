@@ -19,7 +19,19 @@
 - **性能有实测背书**：60 人热区混战每客户端 ≈3.8KB/s 下行、attack→hit p95 ≤51ms；
   CI 带 benchmark 回归门禁防性能劣化（数据见[性能与压测](performance.md)）。
 
-## 5 分钟跑起来
+## 跑起来（两条路）
+
+**路线 A · 入门套件（推荐起步，5 分钟）**：
+
+```bash
+composer create-project nythros/skeleton my-game && cd my-game
+php bin/launch.php                       # 起最小 Map 服务器（主城 AOI + 副本全量广播）
+php client.php alice 18081               # 另一终端：登录→移动→看视野广播帧
+```
+
+随后按[成长教程](growth/00-roadmap.md)逐阶加功能（战斗→社交→集群）。
+
+**路线 B · monorepo demo（全功能参考实现，10~30 分钟）**：
 
 ```bash
 docker compose up -d                 # Redis + MySQL 依赖栈

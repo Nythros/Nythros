@@ -138,3 +138,37 @@ social 三角色无状态，可直接替换进程。容量准入/draining 语义
 - MySQL 长时间不可用时 worker 存活但归档持续失败（saveBatch 返回失败 id + 日志），恢复后自愈——
   监控必须对 `[ArchivePipeline]` 日志告警。
 
+## 8. 发布与仓库形态
+
+**开发只有一个仓库**：[Nythros/Nythros](https://github.com/Nythros/Nythros)（monorepo，含
+`packages/engine|framework|skeleton|demo|client-js`）。用户可见的三个 Composer 包是它的**发布镜像**（ADR-019 决策 B）：
+
+| 镜像仓 | 来源子树 | 发布渠道 |
+|---|---|---|
+| [Nythros/engine](https://github.com/Nythros/engine) | `packages/engine` | Packagist `nythros/engine` |
+| [Nythros/framework](https://github.com/Nythros/framework) | `packages/framework` | Packagist `nythros/framework` |
+| [Nythros/skeleton](https://github.com/Nythros/skeleton) | `packages/skeleton` | Packagist `nythros/skeleton`（create-project 模板） |
+
+发布流程（全部自动，人工只有一个动作——在 monorepo 打 tag）：
+
+```bash
+git tag v0.1.1 && git push origin v0.1.1
+```
+
+`.github/workflows/release.yml` 随即执行：质量门禁（phpunit/phpstan）→ GitHub Release（engine/framework
+zip 附件）→ **git subtree split** 把三个 `packages/*` 子树强推镜像仓 `main` + 同名版本 tag（skeleton 拆分时
+自动把依赖约束对齐到 tag 次版本）→ Packagist 通知 → npm（@nythros/client，配了 token 才启用）。
+
+三条纪律：
+
+1. **镜像仓只读**：直接向 Nythros/engine|framework|skeleton 的提交会在下一个 tag 被强推覆盖。所有改动
+   （含 skeleton 文档）都发生在 monorepo `packages/` 下。
+2. **skeleton 只在稳定 tag 同步**：engine/framework 的日常 dev 迭代不流入 skeleton；每次发布同时刷新
+   skeleton 的 Packagist 冒烟（其仓库 CI：create-project 组合 → launch → client 断言）。
+3. **Secret 前置**（仓库 Settings → Secrets and variables → Actions）：`SUBSPLIT_TOKEN`（对三个镜像仓有
+   Contents: write 的 PAT）、可选 `PACKAGIST_USERNAME`/`PACKAGIST_TOKEN`（拆分仓未配 Packagist webhook 时
+   的双保险）、可选 `NPM_TOKEN`。缺哪个对应 job 跳过哪个，不阻塞 GitHub Release。
+
+> 历史注记：ADR-019 当时按「两包（engine/framework）」编写，skeleton 纳入发布矩阵为后续演进（见 CHANGELOG 与
+> blueprint/21）。blueprint 是决策记录，不回改。
+

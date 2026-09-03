@@ -5,8 +5,10 @@
 ## 1. 三层结构
 
 ```text
-Demo（组装 + 游戏示例）
-  └─ nythros/demo：deploy.yaml 拓扑、SocialServer 社交装配、MapServer、Protocol、怪物/掉落示例
+组装层（用户项目的形态示例，两个）
+  ├─ nythros/skeleton：create-project 入门套件——最小可运行 Map 服务器（Packagist 发布）
+  └─ nythros/demo：参考实现（对内验收）——deploy.yaml 拓扑、SocialServer/MapServer 全功能装配、
+     Protocol 词表、怪物/掉落示例、verify-* 脚本族（不对外发布）
 
 Framework（三基类 + 业务模块 + 插件 + 脚手架）
   └─ nythros/framework：BasePlayer/BaseMonster/BaseNPC（继承 engine 的 Actor\BaseActor）+ Damageable + Combat/Inventory/Social/Actor/Auth 模块 + Plugin + make CLI
@@ -30,11 +32,12 @@ Engine（契约 + 核心实现）
 - 插件机制 `Nythros\Framework\Plugin`：官方插件（Skill / Item / Buff）经 `PluginRegistry::load` 走 register → enable 生命周期，数据定义经 Container 注入。
 - 脚手架 `make` CLI：`make:actor` / `make:skill` / `make:event` / `make:map`（入口 `vendor/bin/make`）。
 
-### 1.3 Demo：组装与示例
+### 1.3 组装层：skeleton（入门套件）与 demo（参考实现）
 
-- 拓扑事实源：`packages/demo/config/deploy.yaml`（描述全部部署单元：social 三角色 + 地图/副本频道，ADR-021 自研单栈）。
-- 组装脚本：`bin/server`（根编排壳，读 deploy.yaml 分组 spawn）→ 社交组逐角色 spawn `run-worker.php --service=<type>`、地图组 spawn `bin/start-maps.php`；`launch.php` 保留为只起地图的便捷入口。
-- 游戏示例：`MapServer`（认证/移动/视野广播入口）、`SocialServer`（社交三角色共用装配壳）、`StaticAuthenticator`（演示账号占位）、`Protocol/*`（演示自有协议词表）；战斗闭环与社交业务逻辑已上移 framework（见 1.2）。
+- **skeleton**：`composer create-project nythros/skeleton` 的模板——最小但功能完整的单 Map 进程世界（认证直通/移动/AOI 广播/NPC 巡游），依赖仅 engine + framework，随稳定 tag 从 monorepo 同步发布。
+- **demo**：全功能参考实现与对内验收场，不对外发布。拓扑事实源：`packages/demo/config/deploy.yaml`（描述全部部署单元：social 三角色 + 地图/副本频道，ADR-021 自研单栈）。
+- demo 组装脚本：`bin/server`（根编排壳，读 deploy.yaml 分组 spawn）→ 社交组逐角色 spawn `run-worker.php --service=<type>`、地图组 spawn `bin/start-maps.php`；`launch.php` 保留为只起地图的便捷入口。
+- 游戏示例：`MapServer`（认证/移动/战斗/经济/GM 路由面）、`SocialServer`（社交三角色共用装配壳）、`StaticAuthenticator`（演示账号占位）、`Protocol/*`（演示自有协议词表）；战斗闭环与社交业务逻辑在 framework（见 1.2）。
 
 ## 2. 服务拓扑
 
@@ -75,7 +78,7 @@ flowchart TD
         D["MapServer / SocialServer 装配 · deploy.yaml · Protocol 词表 · verify-* E2E"]
     end
     subgraph Framework["nythros/framework（开箱即用层）"]
-        F["四基类 + Damageable · Combat/Inventory/Social/Mail/Quest/Auction/Matching/Leaderboard/GM · Plugin + make CLI"]
+        F["三基类 + Damageable · Combat/Inventory/Social/Mail/Quest/Auction/Matching/Leaderboard/GM · Plugin + make CLI"]
     end
     subgraph Engine["nythros/engine（契约 + 核心实现）"]
         E["Contracts（冻结契约）<br/>World/Actor/AOI/Scheduler/Event/Network/Protocol/Security/Persistence/Cluster 实现（@internal）"]
@@ -145,23 +148,24 @@ flowchart TD
   Cell   → 业务模块（RPG/Skill/Inventory）
 ```
 
-具体到代码：Demo 的业务类（如 `MonsterActor`）只依赖 `Nythros\Contracts` 接口 + `Nythros\Framework` 基类 + demo 自建接口，绝不 import 引擎 `@internal` 实现（铁律 1）。
+具体到代码：业务类只依赖 `Nythros\Contracts` 接口 + `Nythros\Framework` 公开类，绝不 import 引擎 `@internal` 实现（铁律 1，CI `composer internal` 对 framework/src 强制 use 扫描）；引擎 `@internal` 装配类只允许出现在**组装入口**（skeleton 的 `bin/` 与 demo 的 `MapChannelFactory`/`run-worker` 等组装层，门禁豁免）。
 
-## 4. 包结构
+## 4. 包结构与发布形态
 
-阶段 6（ADR-018/019）的发布形态：
+monorepo 开发、独立仓镜像发布（ADR-019 决策 B，已落地）：
 
-| 包 | 内容 | 依赖 |
-|---|---|---|
-| `nythros/engine` | 15 个核心模块物理合并为单包：contracts、kernel、kernel-workerman、scheduler、world、entity、actor、aoi、event、network、network-workerman、protocol、security、persistence、cluster | `workerman/workerman ^5.2.2` |
-| `nythros/framework` | 四基类 + Damageable + 插件机制 + make CLI | `nythros/engine` |
-| `nythros/demo` | 组装 + 游戏示例；create-project 模板雏形（独立仓库后置） | `nythros/engine` + `nythros/framework`（Workerman 经 engine 传递引入） |
+| 包 | 内容 | 依赖 | 发布 |
+|---|---|---|---|
+| `nythros/engine` | 15 个核心模块物理合并为单包：contracts、kernel、kernel-workerman、scheduler、world、entity、actor、aoi、event、network、network-workerman、protocol、security、persistence、cluster | `workerman/workerman ^5.2.2` | Packagist + [Nythros/engine](https://github.com/Nythros/engine) 镜像仓 |
+| `nythros/framework` | 三基类 + Damageable + 业务模块 + 插件机制 + make CLI | `nythros/engine` | Packagist + [Nythros/framework](https://github.com/Nythros/framework) 镜像仓 |
+| `nythros/skeleton` | create-project 入门套件：最小可运行 Map 服务器骨架（type: project） | `nythros/engine` + `nythros/framework` | Packagist + [Nythros/skeleton](https://github.com/Nythros/skeleton) 镜像仓（v* tag subsplit 强推） |
+| `nythros/demo` | 参考实现（对内验收）：全功能装配 + verify-* 脚本族（type: library） | `nythros/engine` + `nythros/framework` | 不发布（monorepo 内随开发演进） |
 
 要点：
 
 - **namespace 不统一**：合并只动 composer.json 与目录，保留 15 个命名空间（`Nythros\Contracts\`、`Nythros\Kernel\`、`Nythros\World\` 等），源码零改动（ADR-019）。
-- 用户安装心智是「一个 engine + 一个 framework」；15 个内部包的边界是工程实现细节，不暴露给最终用户。
-- 版本策略：`v0.1.0-alpha` → `v0.5.0-beta` → `v1.0.0`；当前 API 已冻结，从 alpha 起步。
+- 用户安装心智是「一个 engine + 一个 framework」；15 个内部包的边界是工程实现细节，不暴露给最终用户。新用户从 `composer create-project nythros/skeleton` 起步。
+- 版本策略：已发布 v0.1.0（CHANGELOG 为准，契约自 v0.1 冻结）；0.x 次版本内允许装配层破坏性调整，`v1.0.0` 前公开面（Contracts + 白名单 + framework 公开类）不再破坏。仓库形态与发布流水线详见[部署指南](deployment.md)「发布与仓库形态」节。
 
 ## 5. 运行时数据流（关键流程）
 
@@ -214,8 +218,8 @@ sequenceDiagram
 7. Network outbound flush（Outbox 批量发送）
 ```
 
-## 6. 演进方向（阶段 6）
+## 6. 演进方向
 
 - 文档分级（ADR-018 决策 3）：Quick Start（门禁必需）→ Architecture / Actor Guide / Cell Guide（本组四篇）→ Protocol / Security / Cluster / Framework Guide（渐进）。
-- 发布节奏：版本 tag → create-project 模板 → CI/Release（GitHub Actions + Packagist）→ 生态。
+- ✅ 发布流水线已落地：v* tag → subsplit 三镜像仓（engine/framework/skeleton）→ Packagist → GitHub Release + npm（`.github/workflows/release.yml`）。
 - Cluster 能力（跨进程/跨服务器）明确后置：演进顺序 单进程 → 多 Actor → 多地图 → 多进程 → 跨进程 → 跨服务器。

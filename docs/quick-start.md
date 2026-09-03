@@ -1,7 +1,16 @@
 # Nythros 快速启动（Quick Start）
 
-> 目标：从零启动 Demo 服务器并跑通最小游戏循环，预计 10~30 分钟。
-> 当前阶段 6：本指南描述**从 monorepo 启动**的形态；`composer create-project` 模板形态待 Packagist 发布后另行提供（见文末）。
+> 有两条路，先选一条：
+>
+> | 路线 | 适合谁 | 你要什么 | 耗时 |
+> |---|---|---|---|
+> | **A. 入门套件**（推荐起步） | 要开新游戏项目的开发者 | `composer create-project nythros/skeleton my-game` 得到最小可运行 Map 服务器（认证/移动/AOI 视野/NPC 巡游），随后按[成长教程](growth/00-roadmap.md)逐阶加功能 | 5 分钟 |
+> | **B. monorepo demo**（本文余下部分） | 要研究/验收全功能实现、参与 Nythros 开发的人 | 完整参考实现：战斗/社交/匹配/经济/集群（`packages/demo`，对内验收场，不对用户发布） | 10~30 分钟 |
+>
+> 路线 A 的操作细节见入门套件仓库 README（[Nythros/skeleton](https://github.com/Nythros/skeleton)）：
+> create-project → `php bin/launch.php` → `php client.php alice 18081`，其仓库 CI 每次发布自动验证这条链路。
+>
+> 以下是路线 B。
 
 ## 1. 前置依赖
 
@@ -40,7 +49,7 @@ docker compose down      # 停止并移除容器（数据不持久化，重建�
 
 ## 2. 步骤 ①：安装依赖
 
-在项目根目录（monorepo，含 `packages/engine`、`packages/framework`、`packages/demo` 三个子包）执行：
+在项目根目录（monorepo，含 `packages/engine`、`packages/framework`、`packages/skeleton`、`packages/demo` 四个子包与 `packages/client-js`）执行：
 
 ```bash
 composer install
@@ -123,7 +132,7 @@ php vendor/bin/make make:actor PlayerActor2 --kind=player --ns=Nythros\Demo\Game
 - `--kind=player|monster|npc`：分别继承 `BasePlayer`（钩子 `onTick/onDamaged/onDeath`）、`BaseMonster`（钩子 `onPatrol/onChase/onAttack/onDead/onDeath`）、`BaseNPC`（钩子 `onIdle/onInteract`）。
 - `--out` 目录不存在时会自动创建。
 - 另有 `make:skill` / `make:event` / `make:map` 三类脚手架，用法见 `php vendor/bin/make` 输出。
-- 生成的骨架带 TODO 注释，参照 `packages/demo/src/Combat/MonsterActor.php` 与 `packages/demo/src/PlayerActor.php` 实现钩子即可（详见《Actor 指南》）。
+- 生成的骨架带 TODO 注释，参照 `packages/framework/src/Actor/PlayerActor.php` 与 `packages/framework/src/Combat/MonsterActor.php` 实现钩子即可（详见《Actor 指南》）。
 
 ## 6. 步骤 ⑤：客户端连接验证
 
@@ -182,15 +191,13 @@ php packages/demo/bin/ws-client.php   # 期望输出 [client] received: echo: he
               验收/生产可替换为可观察存储实现）
 ```
 
-## 8. 关于 create-project 形态
+## 8. 本文与入门套件、demo 的关系
 
-当前版本从 monorepo 启动（本文档描述的就是该形态）。按 ADR-018/ADR-019 规划：
-
-- 发布后用户将 `composer create-project nythros/demo my-game` 获得独立模板仓库；
-- 模板依赖 `nythros/engine` + `nythros/framework`，含 `config/deploy.yaml`、服务管理命令与最小游戏示例；
-- 届时本指南的「步骤 ①」将替换为 create-project 一步，其余步骤（配置、`bin/server start`、`make:actor`、验收）不变。
-
-Packagist 发布完成前，请使用本文档描述的 monorepo 方式。
+- **入门套件（nythros/skeleton）**是唯一的 create-project 模板（Packagist 已发布），也是路线 A 的起点；
+  它刻意只做最小集（无战斗/社交/集群），完整语义在 demo 里都有参考实现。
+- **demo（nythros/demo）**是对内参考实现与验收场，`type: library`，**不会**也**不应**被 create-project。
+- 从路线 A 出发逐步长出 demo 的全部功能：看[成长教程](growth/00-roadmap.md)——每章打通一个功能语义，
+  验收脚本可直接跑通该章里程碑。
 
 ## 9. 常见问题
 
