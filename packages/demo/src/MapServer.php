@@ -51,6 +51,7 @@ use Nythros\Framework\Mail\MailNotifierInterface;
 use Nythros\Framework\Mail\MailService;
 use Nythros\Framework\Matching\MatchingService;
 use Nythros\Framework\Persistence\PersistPipelineInterface;
+use Nythros\Framework\Persistence\SessionParticipantInterface;
 use Nythros\Framework\Plugin\Item\ItemDefinition;
 use Nythros\Framework\Plugin\Item\ItemRepository;
 use Nythros\Framework\Plugin\Skill\SkillDefinition;
@@ -136,6 +137,18 @@ final class MapServer extends RealtimeServer implements VisionBroadcasterInterfa
     private ?MatchingService $matching = null;
 
     private ?QuestService $quests = null;
+
+    /**
+     * 会话参与者（统一 open/close 生命周期钩子，框架 SessionParticipantInterface）：attach 完成后
+     * 逐个 onSessionOpen、detach 清理链逐个 onSessionClose（幂等契约见接口注释）。QuestService 经
+     * attachGameplay 自动登记；其余会话态能力块由装配层 addSessionParticipant 注册。
+     * Session participants (the unified open/close lifecycle): onSessionOpen after attach, onSessionClose in the
+     * detach cleanup chain (idempotent contract per the interface). attachGameplay auto-registers a QuestService;
+     * other session-state blocks register via addSessionParticipant at assembly.
+     *
+     * @var list<SessionParticipantInterface>
+     */
+    private array $sessionParticipants = [];
 
     /** 随机源：spawnMonster 构造 MonsterActor 与战斗浮动共用；缺省 null 时回退系统随机。Random source: shared by spawnMonster's MonsterActor construction and combat variance; falls back to the system random source when null. */
     private readonly RandomSourceInterface $random;
@@ -951,6 +964,26 @@ final class MapServer extends RealtimeServer implements VisionBroadcasterInterfa
         $this->cooldowns = $cooldowns;
         $this->matching = $matching;
         $this->quests = $quests;
+        // 会话态能力块自动接入统一生命周期（QuestService 实现 SessionParticipantInterface）——
+        // 装配层无需为每个玩法块往 attach/detach 插调用
+        // Session-state blocks join the unified lifecycle automatically (QuestService implements the contract) —
+        // assemblies never splice per-capability calls into attach/detach
+        $this->addSessionParticipant($quests);
+    }
+
+    /**
+     * 注册会话参与者（幂等按对象同一性去重）：attach/detach 生命周期统一驱动 open/close。
+     * Registers a session participant (deduplicated by object identity): its open/close run on the unified
+     * attach/detach lifecycle.
+     */
+    public function addSessionParticipant(SessionParticipantInterface $participant): void
+    {
+        foreach ($this->sessionParticipants as $registered) {
+            if ($registered === $participant) {
+                return; // 同一实例重复注册幂等跳过 re-registering the same instance is a no-op
+            }
+        }
+        $this->sessionParticipants[] = $participant;
     }
 
     /**
@@ -1513,12 +1546,14 @@ final class MapServer extends RealtimeServer implements VisionBroadcasterInterfa
         $this->mountPlayer($conn, $entity, $actor);
         $this->playerCount++;
 
-        // 任务进度会话预热（主循环 IO 剥离）：attach 时一次性载入该 uid 全部进度进写回缓冲，令后续
-        // combat.kill/pickup 驱动的任务进度读写全走内存（QuestService 无写回后端时零操作）。
-        // Quest-progress session preload (the hot-path IO strip): at attach the uid's whole progress set is loaded
-        // into the write-back buffer, so the later combat.kill/pickup-driven quest reads/writes stay in memory
-        // (a no-op for QuestService without a write-back backend).
-        $this->quests?->preload($record->uid);
+        // 会话参与者统一预热（主循环 IO 剥离的通用形态）：attach 后逐个 onSessionOpen——任务进度
+        // 整批载入写回缓冲、后续宠物/成就等会话块同通道接入;每连接同步点,后端往返不进每消息路径。
+        // Unified session preload (the generalized hot-path IO strip): every participant's onSessionOpen after
+        // attach — the quest-progress batch load rides the write-back buffer, later pet/achievement blocks join
+        // through the same channel; per-connection sync points, backend round-trips never on the per-message path.
+        foreach ($this->sessionParticipants as $participant) {
+            $participant->onSessionOpen($record->uid);
+        }
 
         $this->send($conn, Message::create('auth_ok', ['uid' => $record->uid, 'id' => $entityId], $message->requestId));
     }
@@ -1557,12 +1592,14 @@ final class MapServer extends RealtimeServer implements VisionBroadcasterInterfa
                 // store-less assembly is a no-op.
                 $this->exportTransferSnapshot($entityId, $actor);
 
-                // 任务进度会话收尾（写回缓冲）：回写本场未冲刷的脏进度并释放缓冲——每连接级同步点
-                // （与上方 flushId/票据导出同口径），使任务进度在战斗/拾取每消息路径零 IO。
-                // Quest-progress session close-out (the write-back buffer): unflushed dirty progress is written back
-                // and the buffer released — a per-connection sync point (the same tier as the flushId/ticket export
-                // above), keeping quest progress at zero IO on the per-message combat/pickup path.
-                $this->quests?->evict($actor->uid());
+                // 会话参与者统一收尾:逐个 onSessionClose(回写脏进度并释放缓冲)——每连接级同步点,
+                // 与上方 flushId/票据导出同层,战斗/拾取每消息路径保持零 IO。
+                // Unified session close-out: every participant's onSessionClose (flush dirty progress, release the
+                // buffer) — a per-connection sync point on the same tier as the flushId/ticket export above,
+                // keeping the per-message combat/pickup path at zero IO.
+                foreach ($this->sessionParticipants as $participant) {
+                    $participant->onSessionClose($actor->uid());
+                }
             }
             $this->actorSystem->remove($actor);
             unset($this->actors[$entityId]);

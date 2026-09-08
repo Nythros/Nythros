@@ -6,6 +6,7 @@ namespace Nythros\Framework\Quest;
 
 use Nythros\Framework\Event\EventDispatcherInterface;
 use Nythros\Framework\Inventory;
+use Nythros\Framework\Persistence\SessionParticipantInterface;
 
 /**
  * 任务服务（R3 玩法批）：三类进度源（击杀/收集/对话）的进度状态机与奖励发放。
@@ -32,8 +33,13 @@ use Nythros\Framework\Inventory;
  * Instrumentation consumption (closing the D4 gap): attachDispatcher hooks this service onto CombatService's
  * combat.kill / combat.pickup instrumentation — business events from the kill/pickup paths drive the first two
  * progress sources directly; the talk source has no natural event and is fed by an explicit reportTalk call from routes.
+ *
+ * 会话参与者（SessionParticipantInterface）：onSessionOpen/onSessionClose 委托 preload/evict——
+ * 任务进度缓存随玩家会话开关走统一生命周期（MapServer attach/detach 驱动,无需装配层逐能力插调用）。
+ * Session participant: onSessionOpen/onSessionClose delegate to preload/evict — the quest-progress cache joins
+ * the unified session lifecycle driven by MapServer attach/detach (no per-capability splices in the assembly).
  */
-final class QuestService
+final class QuestService implements SessionParticipantInterface
 {
     /** 击杀埋点事件名（CombatService 派发）。 The kill-instrumentation event name (dispatched by CombatService). */
     public const EVENT_KILL = 'combat.kill';
@@ -203,6 +209,24 @@ final class QuestService
         if ($this->store instanceof CachedQuestStore) {
             $this->store->flushAll();
         }
+    }
+
+    /**
+     * 会话开启钩子（SessionParticipantInterface）：委托 preload（写回后端未热身的 uid 整批载入）。
+     * The session-open hook: delegates to preload (batch-loads the uid into the write-back store).
+     */
+    public function onSessionOpen(string $uid): void
+    {
+        $this->preload($uid);
+    }
+
+    /**
+     * 会话结束钩子（SessionParticipantInterface）：委托 evict（回写脏进度并释放会话缓存）。
+     * The session-close hook: delegates to evict (writes back dirty progress and frees the session cache).
+     */
+    public function onSessionClose(string $uid): void
+    {
+        $this->evict($uid);
     }
 
     /**

@@ -5,7 +5,7 @@
 > 未标 `@internal` 的类/枚举（ADR-023/024）。`@internal` 实现类不构成 API 承诺，业务层只依赖 Contracts 接口。
 > 指南（用法与教程）见 [docs/ 索引](https://github.com/nythros/nythros/tree/master#文档索引)；本文件只做「有什么、叫什么、签名单什么」的索引。
 > 摘要中的 P 编号（P9/P11/P15…）是阶段验收记录的追溯锚点，对应 [blueprint/](https://github.com/nythros/nythros/tree/master/blueprint) 目录的编号验收文档。
-170 个公开符号（engine + framework）。
+171 个公开符号（engine + framework）。
 
 
 ## nythros/engine
@@ -1327,6 +1327,14 @@ Redis 权威 + Stream 导出管线（PersistPipelineInterface 的第二实现，
 | `periodicFlush(): void` | {@inheritDoc} 30s 时钟门控兜底。 The 30s clock-gated fallback. |
 | `scheduleFlushId(string $id): void` | {@inheritDoc} 合并冲刷:登记紧急队列,0.2s 窗并批;无定时器回落 flushId。 Coalesced flush: enqueues and the 0.2s window batches; without a timer it falls back to flushId. |
 
+#### `Nythros\Framework\Persistence\SessionParticipantInterface`
+会话状态参与者契约（统一会话生命周期钩子）：持「玩家在线期间的进程内会话态」的能力块
+
+| 方法 | 说明 |
+|---|---|
+| `onSessionClose(string $uid): void` | 会话结束（detach 清理链调用）：回写未冲刷的脏数据并释放内存。幂等。 |
+| `onSessionOpen(string $uid): void` | 会话开启（attach 完成后调用）：预热该 uid 的会话态。幂等。 |
+
 ### `Nythros\Framework\Plugin`
 
 #### `FeatureFlags`
@@ -1546,7 +1554,7 @@ Skill 插件：向 Container 注册 SkillRepository，并订阅 'skill.cast' 作
 | `register(Nythros\Framework\Quest\QuestDefinition $quest): void` | 注册任务定义；同 id 后注册覆盖先注册。 |
 
 #### `QuestService`
-任务服务（R3 玩法批）：三类进度源（击杀/收集/对话）的进度状态机与奖励发放。
+任务服务（R3 玩法批）：三类进度源（击杀/收集/对话）的进度状态机与奖励发放。 · implements `Nythros\Framework\Persistence\SessionParticipantInterface`
 
 | 方法 | 说明 |
 |---|---|
@@ -1557,6 +1565,8 @@ Skill 插件：向 Container 注册 SkillRepository，并订阅 'skill.cast' 作
 | `definitions(): Nythros\Framework\Quest\QuestRepository` | 任务定义注册表（组装层注册定义用）。 |
 | `evict(string $uid): void` | 会话淘汰（断连/登出收尾）：回写该 uid 的未冲刷进度并释放缓冲；非写回后端零操作。 |
 | `flushPending(): void` | 全量兜底冲刷：把所有未回写的脏进度写回后端（供 30s 定时兜底；崩溃丢失窗口的边界，同 ArchivePipeline |
+| `onSessionClose(string $uid): void` | 会话结束钩子（SessionParticipantInterface）：委托 evict（回写脏进度并释放会话缓存）。 |
+| `onSessionOpen(string $uid): void` | 会话开启钩子（SessionParticipantInterface）：委托 preload（写回后端未热身的 uid 整批载入）。 |
 | `preload(string $uid): void` | 会话预热（写回缓冲接线，主循环 IO 剥离）：委托 store 在入场时一次性载入该 uid 的全部进度—— |
 | `progressOf(string $uid, string $questId): ?Nythros\Framework\Quest\QuestProgress` | 查询某 uid 某任务的进度；无记录返回 null。 |
 | `reportCollect(string $uid, string $itemId, int $count): void` | 收集进度上报：source=collect 且 targetId 匹配的任务按入包数量累计。 |

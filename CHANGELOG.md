@@ -21,6 +21,13 @@
 
 ### Added
 
+- **会话状态统一生命周期（[框架/Persistence + 框架/Quest + demo/装配]，路线图③「搭积木」会话地基）**：
+  `SessionParticipantInterface`（onSessionOpen/onSessionClose 幂等契约:open=attach 读路径预热（每连接
+  同步点允许批量读）、close=detach 回写+释放（失败留脏不丢））;QuestService 实现之（委托既有
+  preload/evict,非写回后端天然免疫）;MapServer 侧 `attachGameplay` 自动登记 + `addSessionParticipant`
+  显式注册(按对象同一性去重),attach/detach 改为参与者循环驱动——新会话态能力块(宠物/成就/在线表)
+  接入框架而**零主循环改动**。会话重开语义经测试钉死:close 淘汰后再 open=新会话重预热,同会话重复
+  open 幂等。测试 +3(契约实现/预热回写往返计数/直连后端免疫)。
 - **能力开关：声明式条件装配（[框架/Plugin + 框架/Game]，路线图②「搭积木」地基）**：
   `FeatureFlags`（三级优先：`NYTHROS_FEATURE_<NAME>` 覆盖 > `NYTHROS_FEATURES` 白名单 > 缺省全开=存量
   零影响;解析只发生在 fromEnvironment 一处,类不读全局可测可注入）+ `FeaturePluginInterface`
