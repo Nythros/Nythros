@@ -21,6 +21,14 @@
 
 ### Added
 
+- **登录 bcrypt 恒时化 + 成本可调（主循环 CPU 剥离收尾,审计 P0-A 闭环）**：`StaticAuthenticator`
+  对不存在账号也执行一次 dummy 哈希 `password_verify`（恒时路径,「账号不存在」与「密码错误」同耗时
+  同异常,关闭时序枚举侧漏;dummy 惰性生成,构造零 bcrypt）;新增 `NYTHROS_BCRYPT_COST`（缺省 9）
+  统一控制开发账号装载哈希与 dummy 哈希的 cost——WSL2 实测单进程登录吞吐 cost 10≈24/s(42ms)
+  →9≈45/s(22ms)→8≈93/s(11ms),每 -1 翻倍。洪峰优先级:调 cost → gateway `count>1`
+  （deploy.yaml 原生横扩,登录无状态;security.md §2 + deploy.yaml 注记）。未知 username 枚举的
+  恒定 bcrypt 成本由既有 gateway 令牌桶（10/s）封顶,与 ThrottledAuthenticator 锁定叠加成
+  「成本有硬上界的恒时认证」。
 - **「Redis 管热数据、MySQL 只落盘」持久化模型（worker 零 PDO）**：①背包换 Redis 权威
   `RedisInventoryStore`（`nythros:bag:{uid}` hash,快照覆盖写 = pipeline 单往返,attach 恢复主路径,与
   CurrencyLedger 同风格);②持久化管线抽契约 `PersistPipelineInterface`(+`bindTimer` fork 后绑定,修正

@@ -72,4 +72,33 @@ final class StaticAuthenticatorTest extends TestCase
         $this->expectException(AuthenticationException::class);
         $authenticator->authenticate(['username' => '1001', 'password' => 'secret']);
     }
+
+    public function testUnknownAndWrongPasswordShareOneConstantTimePath(): void
+    {
+        // 恒时设计核心断言：不存在账号（dummy 哈希比对）与密码错误（真哈希比对）走同一异常、同一文案——
+        // 时序探测无法区分二者（dummy cost 与表同源，由构造参数钉住）。行为断言，非计时断言（避免 flaky）。
+        // The constant-time core: an unknown account (dummy-hash compare) and a wrong password (real-hash compare)
+        // share one exception and message — timing probes cannot distinguish them (the dummy cost is pinned via the
+        // constructor to match the table). A behavioral assertion, not a timing one (flaky-free).
+        $authenticator = new StaticAuthenticator(
+            ['1001' => password_hash('secret', PASSWORD_BCRYPT, ['cost' => 4])],
+            bcryptCost: 4,
+        );
+
+        $unknown = null;
+        $wrong = null;
+        try {
+            $authenticator->authenticate(['username' => 'ghost', 'password' => 'anything']);
+        } catch (AuthenticationException $e) {
+            $unknown = $e->getMessage();
+        }
+        try {
+            $authenticator->authenticate(['username' => '1001', 'password' => 'wrong']);
+        } catch (AuthenticationException $e) {
+            $wrong = $e->getMessage();
+        }
+
+        self::assertNotNull($unknown, 'unknown account must be rejected');
+        self::assertSame($wrong, $unknown, 'unknown account and wrong password must be indistinguishable');
+    }
 }

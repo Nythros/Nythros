@@ -28,6 +28,14 @@ use Nythros\Security\IdentityInterface;
  * failures recorded and successes cleared. Inner exception messages pass through unchanged; lockout rejections
  * use a fixed message — beyond the existing "no account-existence leakage" semantics, lockout state itself is
  * not differentiated to avoid a timing side channel for account probing.
+ *
+ * 与恒时 bcrypt 的配套：未锁定流量进内层后，StaticAuthenticator 对不存在账号也跑一次 dummy bcrypt（恒时、
+ * 不泄露存在性）——本装饰器把「同一 username 反复爆破」挡在 bcrypt 之前，未知 username 枚举则由网关令牌桶
+ * （run-worker 10/s）封顶总 bcrypt 速率,两者叠加即「成本可控的恒定时间认证」。
+ * Pairing with constant-time bcrypt: unlocked traffic reaching the inner authenticator pays a dummy bcrypt even
+ * for unknown accounts (constant time, no existence leak). This decorator blocks repeated brute force on one
+ * username before bcrypt, while the gateway token bucket (run-worker, 10/s) caps total bcrypt rate for
+ * unknown-username enumeration — together, constant-time authentication at bounded cost.
  */
 final class ThrottledAuthenticator implements AuthenticatorInterface
 {

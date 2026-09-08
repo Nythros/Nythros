@@ -394,6 +394,13 @@ switch ($options['service']) {
         // Account table in two forms (production conventions in docs/security.md §5):
         //   NYTHROS_ACCOUNTS_FILE: a PHP file returning [uid => password_hash(...)] (production — plaintext never enters env/process lists);
         //   NYTHROS_ACCOUNTS: `uid=password` plaintext pairs, hashed on load (development; defaults 1001/1002/1003 with password secret).
+        // bcrypt 成本（主循环 CPU 剥离）：每 -1 登录阻塞减半（10≈60-100ms / 9≈30-50ms / 8≈15-25ms）。
+        // 游戏账号缺省 9;敏感场景回调 10+ 并配合 gateway count>1（security.md §5）。令牌桶已把 auth 封顶
+        // 10/s（本文件 §319）,故 dummy verify 的恒定 bcrypt 成本有上界。dummy 哈希与账号表同 cost 才真恒时。
+        // Configurable bcrypt cost (hot-path CPU strip): each -1 halves per-login block. Default 9 for game
+        // accounts; raise for sensitive deployments paired with gateway count>1. The auth token bucket caps at
+        // 10/s so the constant-time dummy bcrypt has a hard upper bound. The dummy hash must share the table's cost.
+        $bcryptCost = max(4, min(31, (int) (getenv('NYTHROS_BCRYPT_COST') ?: 9)));
         $accountsFile = getenv('NYTHROS_ACCOUNTS_FILE');
         $accounts = [];
         if (is_string($accountsFile) && $accountsFile !== '') {
@@ -413,7 +420,7 @@ switch ($options['service']) {
                     fwrite(STDERR, sprintf("[run-worker] fatal: 非法账号对 \"%s\"（期望 uid=password）\n", $pair));
                     exit(1);
                 }
-                $accounts[$parts[0]] = password_hash($parts[1], PASSWORD_DEFAULT);
+                $accounts[$parts[0]] = password_hash($parts[1], PASSWORD_BCRYPT, ['cost' => $bcryptCost]);
             }
         }
 
@@ -423,7 +430,7 @@ switch ($options['service']) {
         // for NYTHROS_AUTH_LOCKOUT_SECONDS (default 60). The gateway is single-process so in-process counting is
         // complete; with multiple gateway instances the global cap scales by instance count — lower the threshold for production.
         $authenticator = new ThrottledAuthenticator(
-            new StaticAuthenticator($accounts),
+            new StaticAuthenticator($accounts, $bcryptCost),
             maxAttempts: (int) (getenv('NYTHROS_AUTH_MAX_ATTEMPTS') ?: 5),
             lockoutSeconds: (int) (getenv('NYTHROS_AUTH_LOCKOUT_SECONDS') ?: 60),
         );

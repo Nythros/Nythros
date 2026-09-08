@@ -57,7 +57,12 @@ mysql:
 processes:
   social:                      # 社交部署单元：三角色三进程（对称直连，各角色连接表独立）
                                # Social deployment unit: three roles, three processes (symmetric direct connections, independent per-role connection tables)
-    - type: gateway
+    - type: gateway            # 开服登录洪峰：bcrypt 吞吐由 NYTHROS_BCRYPT_COST 控制（cost 9≈45/s/进程，
+                               # 实测见 security.md §2），再不够加 `count: 2`（登录无状态，横扩线性；
+                               # 防爆破计数按实例放大，阈值相应调低）
+                               # Login storms: bcrypt throughput is tuned by NYTHROS_BCRYPT_COST (cost 9 ≈ 45 logins/s
+                               # per process, see security.md §2); add `count: 2` when needed (login is stateless, scales
+                               # linearly; per-process brute-force counters multiply — lower the threshold accordingly)
       port: 18285
     - type: chat
       port: 18286

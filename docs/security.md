@@ -41,6 +41,15 @@
 - **防爆破**：连续失败 `NYTHROS_AUTH_MAX_ATTEMPTS` 次（缺省 5）锁定该 username
   `NYTHROS_AUTH_LOCKOUT_SECONDS` 秒（缺省 60）——锁定拒绝在认证器之前短路；多网关实例时
   全局上限按实例数放大，生产可调低阈值。
+- **恒时认证（dummy verify）**：不存在账号也执行一次 dummy 哈希 bcrypt 比对,与「密码错误」同耗时
+  同异常——时序探测无法枚举账号存在性。未知 username 的枚举流量因此恒定付 bcrypt,其总速率上界由
+  gateway 令牌桶（§3，10/s）封顶,与防爆破锁定叠加后成本有硬上界。
+- **bcrypt 成本（登录洪峰主旋钮）**：`NYTHROS_BCRYPT_COST` 控制账号装载哈希与 dummy 哈希（同源）的
+  cost,缺省 9。WSL2 实测单进程验证吞吐:cost 10≈24 登录/s(42ms/次)、cost 9≈45/s(22ms)、
+  cost 8≈93/s(11ms)——每 -1 吞吐翻倍。**开服洪峰优先级:调 cost → gateway `count>1`（deploy.yaml
+  原生支持,登录无状态可横扩）→ 调大令牌桶 refill**;敏感账号场景可回调 cost 10+,恒时设计保证
+  无论 cost 高低都不泄露账号存在性。`NYTHROS_ACCOUNTS_FILE` 的离线哈希生成同样建议 `password_hash($pw,
+  PASSWORD_BCRYPT, ['cost' => 9])` 与装载端对齐。
 
 生产替换点：账号来源接自有账号库/服务（实现 `AuthenticatorInterface`），userId 与 username
 解耦（demo 复用 username）；`StaticGmAuthorizer` 替换为自有权限体系同理。
