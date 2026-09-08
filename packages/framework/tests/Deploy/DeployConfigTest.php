@@ -405,7 +405,7 @@ YAML);
     public function testUnknownServiceTypeRejected(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('type 必须是 gateway/chat/team/map 之一');
+        $this->expectExceptionMessage('type 必须是 gateway/chat/team/map/storage 之一');
         DeployConfig::parseYaml("redis:\n  host: 127.0.0.1\n  port: 6379\nprocesses:\n  map-1:\n    - type: voice\n      port: 18081\n");
     }
 

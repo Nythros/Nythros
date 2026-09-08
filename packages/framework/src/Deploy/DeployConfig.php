@@ -35,8 +35,8 @@ namespace Nythros\Framework\Deploy;
  *   - processes 段必填：部署单元拓扑（社交三角色 gateway/chat/team 与地图/副本 map，ADR-021）；
  *     The processes section is required: the deployment-unit topology (the social trio gateway/chat/team plus
  *     map/dungeon, ADR-021);
- *   - type ∈ gateway|chat|team|map；port 为 1~65535 整数且全局唯一；
- *     type ∈ gateway|chat|team|map; port is a 1-65535 integer and globally unique;
+ *   - type ∈ gateway|chat|team|map|storage（storage = 导出进程，bin/server spawn run-exporter.php）；port 为 1~65535 整数且全局唯一；
+ *     type ∈ gateway|chat|team|map|storage (storage = the exporter process spawned via run-exporter.php by bin/server); port is a 1-65535 integer and globally unique;
  *   - map 必须声明非空 mapId + channelId（serviceId = {mapId}#{channelId} 全局唯一）；gateway/chat/team 无此要求；
  *     map must declare a non-empty mapId + channelId (serviceId = {mapId}#{channelId} globally unique); the social roles need none;
  *   - count 缺省 1（整数 ≥1）。
@@ -45,7 +45,7 @@ namespace Nythros\Framework\Deploy;
 final class DeployConfig
 {
     /** 合法服务类型白名单 Service type whitelist. */
-    private const SERVICE_TYPES = ['gateway', 'chat', 'team', 'map'];
+    private const SERVICE_TYPES = ['gateway', 'chat', 'team', 'map', 'storage'];
 
     /** 顶层键白名单 Top-level key whitelist. */
     private const TOP_KEYS = ['redis', 'mysql', 'processes'];
@@ -643,7 +643,7 @@ final class DeployConfig
         $type = $raw['type'] ?? null;
         if (!is_string($type) || !in_array($type, self::SERVICE_TYPES, true)) {
             throw new \InvalidArgumentException(sprintf(
-                'DeployConfig: process "%s" 第 %d 个 service 的 type 必须是 gateway/chat/team/map 之一',
+                'DeployConfig: process "%s" 第 %d 个 service 的 type 必须是 gateway/chat/team/map/storage 之一',
                 $processName,
                 $index,
             ));

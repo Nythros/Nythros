@@ -77,9 +77,16 @@ php vendor/bin/make   # 无参数应打印 make:* 命令用法
 | 18082 | Map `map-1#ch-2` | 地图单元 | 第二频道 |
 | 18083 | Map `map-2#ch-1` | 地图单元 | 第二张地图 |
 | 18084 | Map `dungeon-A#pool-1` | 副本池 | 全量广播型 World |
-| 6379 | Redis | 外部 | 共享状态（token 多 scope / 服务注册 / 组队·位置·帮派快照） |
+| 18300 | storage-exporter | 存储单元 | 仅占位（pidFile/观测键），不监听端口——消费 Stream 落 MySQL |
+| 6379 | Redis | 外部 | 共享状态 + 会话热数据权威（token / 注册 / 社交 / 任务 / 背包 `nythros:bag:*`）+ 导出 Stream |
+| 3306 | MySQL | 外部 | 冷归档（由 exporter 写入；游戏 worker 不直连） |
 
-`deploy.yaml` 描述全部部署单元：`social` 单元（gateway/chat/team 三角色三进程，对称直连，各角色连接表进程内独立）+ 各地图/副本单元。端口全局唯一，重复会在 DeployConfig 解析时被拒绝。
+`deploy.yaml` 描述全部部署单元：`social` 单元（gateway/chat/team 三角色三进程，对称直连，各角色连接表进程内独立）+ 各地图/副本单元 + `storage` 导出单元。端口全局唯一，重复会在 DeployConfig 解析时被拒绝。
+
+**持久化模型（`NYTHROS_PERSIST_MODE`，缺省 `export`）**：游戏 worker 的会话热状态（背包等）权威写 Redis，脏快照 XADD 进
+`nythros:export:players` Stream，由 `run-exporter.php`（`type: storage` 声明的独立进程）消费落 MySQL——worker 进程内零 PDO，
+MySQL 抖动不再是帧问题。`NYTHROS_PERSIST_MODE=mysql` 回退旧口径（worker 直写归档，`--parts` 亦可单起 `storage` 组）。
+丢失窗口契约：崩溃时未冲刷脏状态回退到上次冲刷（≤0.2s 紧急窗/≤30s 兜底），exporter 失联只老化报表不回档。
 
 ### 3.2 WSL2 保留端口：换端口部署
 

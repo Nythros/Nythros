@@ -53,7 +53,7 @@ packages/<pkg>/tests/<Module>/<ClassName>Test.php   # 与 src 的 Module 目录�
 | `verify-combat.php` | 战斗端到端：生成/攻击/死亡/掉落/拾取/技能/持久化（需临时副本，见 quick-start §6.2） |
 | `verify-economy.php` / `verify-matching.php` / `verify-room.php` | 经济 / 匹配 / 房间 |
 | `verify-transfer.php` / `verify-scale.php` | 跨 map 迁移 / 容量准入与扩缩容 |
-| `verify-mmorpg.php` | MMORPG 模式综合 |
+| `verify-mmorpg.php` | MMORPG 模式综合（任务链/领奖落库复核在 export 模式下经 Stream→storage-exporter 链路） |
 
 约定：
 

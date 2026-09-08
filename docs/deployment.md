@@ -43,12 +43,15 @@ curl -s localhost:19100/metrics | head    # metrics 端点（见 §4）
 
 沿用 quick-start 步骤（依赖栈可来自 compose），生产要点：
 
-1. **启动铁序**：Redis → social 单元 → map 单元；`php bin/server start` 已内置探测（Redis 不可用即中止）。
+1. **启动铁序**：Redis → social 单元 → map 单元 → storage 导出单元；`php bin/server start` 已内置探测（Redis 不可用即中止）。
 2. **进程管理**：`bin/server` 前台运行 + `status/stop` 子命令；生产建议 systemd unit
    （`Restart=on-failure`，`ExecStart=php /path/bin/server start`）或等价 supervisor。
-3. **玩法开关**：环境变量 `NYTHROS_CONFIG_DIR` / `NYTHROS_MMORPG` / `NYTHROS_GAMEPLAY` 等
+3. **持久化模型**：缺省 `NYTHROS_PERSIST_MODE=export`——会话热状态权威在 Redis（背包 `nythros:bag:{uid}` 等），
+   脏快照经 `nythros:export:players` Stream 由 `run-exporter.php`（`type: storage`，单消费者）落 MySQL，
+   游戏 worker 零 PDO；设 `mysql` 回退旧直写口径（见 quick-start §3.1）。
+4. **玩法开关**：环境变量 `NYTHROS_CONFIG_DIR` / `NYTHROS_MMORPG` / `NYTHROS_GAMEPLAY` 等
    按 mmorpg-mode §2 的开关表配置。
-4. **Map 有状态，不能 reload**——更新走滚动更新（§5）。
+5. **Map 有状态，不能 reload**——更新走滚动更新（§5）。
 
 ## 4. 监控：Prometheus 指标端点
 
@@ -106,8 +109,10 @@ social 三角色无状态，可直接替换进程。容量准入/draining 语义
 - [ ] 滚动更新流程演练过一次（§5），`map-rolling.php mark-stopping/watch` 可用
 - [ ] 备份/恢复演练过一次（§7）
 - [ ] 容量压测在目标硬件复测过（[performance.md](performance.md) §6.4 复测清单）
-- [ ] 归档存储：MySQL 归档已在正式装配生效（`MySqlStorage` + fork 后幂等 `createSchema` + 30s 兜底 flush +
-      断线 flush + 读路径）；开服前在 staging 验证建表与恢复（§7）
+- [ ] 归档链路（export 模式，缺省）：`type: storage` 已声明、exporter 存活（启动日志 `[run-exporter] started`；
+      离线自检 `php packages/demo/bin/run-exporter.php --self-test`）、`XLEN nythros:export:players` 有界（无持续增长）；
+      mysql 回退模式：worker 直写归档生效（`MySqlStorage` + 幂等 `createSchema` + 30s 兜底 + 合并窗 flush）；
+      两种模式都在 staging 验证建表与恢复（§7）
 
 ## 7. 备份与恢复演练
 
@@ -117,8 +122,8 @@ social 三角色无状态，可直接替换进程。容量准入/draining 语义
 
 | 对象 | 内容 | 策略建议 |
 |---|---|---|
-| MySQL `nythros_storage` 表 | 玩家归档（背包/货币/位置等，ArchivePipeline 全部落点） | 每日全量 dump + binlog 增量；保留 ≥7 天 |
-| Redis | token/转移票据（短 TTL，可不备份）、队伍/帮派/好友/任务/邮件/拍卖/排行（持久业务态） | 开 AOF（everysec）+ 每日 RDB；队伍/帮派等业务键与 token 分库（`NYTHROS_REDIS_DB`）便于差异化管理 |
+| MySQL `nythros_archive` 表 | 玩家归档（背包/任务等快照，export 模式由 storage-exporter 写入、mysql 模式由 worker 直写） | 每日全量 dump + binlog 增量；保留 ≥7 天 |
+| Redis | token/转移票据（短 TTL，可不备份）、队伍/帮派/好友/任务/邮件/拍卖/排行/**背包 `nythros:bag:*`（export 模式权威）**、导出 Stream（积压上限=保险丝值） | 开 AOF（everysec）+ 每日 RDB；队伍/帮派等业务键与 token 分库（`NYTHROS_REDIS_DB`）便于差异化管理 |
 | 配置 | deploy.yaml + 玩法三表 + 账号文件 | 随代码版本管理；账号文件**永不入库**（明文纪律，见 security.md §5） |
 
 ### 7.2 恢复演练步骤（staging 执行并记录）
@@ -127,16 +132,20 @@ social 三角色无状态，可直接替换进程。容量准入/draining 语义
    抽样 `ArchivePipeline::load(uid)` 核对若干已知玩家归档；
 2. **Redis 恢复**：AOF 重放 → 核对队伍/帮派/好友快照与 TTL 语义（token/票据允许全失，短 TTL 本来
    就是设计假设——**在线玩家全掉重登**，这是已记录的行为而非事故）；
-3. **票据丢失专项**：Redis 清空后让一个持有转移票据的客户端重连——预期走默认入场点 + 归档兜底
-   （`NYTHROS_ARCHIVE_RESTORE=1`），记录实际表现；
+3. **票据丢失专项**：Redis 清空后让一个持有转移票据的客户端重连——预期走默认入场点 + 恢复读兜底
+   （export 模式读 `nythros:bag:*` 背包权威、无键即全新；mysql 回退模式走 `NYTHROS_ARCHIVE_RESTORE=1` 归档读），
+   记录实际表现；
 4. **演练产物**：把以上步骤的实际命令、耗时、偏差写进当次发布记录（blueprint/ 附录或内部 runbook）。
 
 ### 7.3 已知边界
 
-- 归档 flush 周期 30s + 断线 flush：Redis/MySQL 双双宕机窗口内**最后 30s 的拾取可能丢失**——
-  这是吞吐与持久性的既有取舍，运维侧用「宕机即公告 + 补偿邮件」承接，不要试图用加锁消除；
-- MySQL 长时间不可用时 worker 存活但归档持续失败（saveBatch 返回失败 id + 日志），恢复后自愈——
-  监控必须对 `[ArchivePipeline]` 日志告警。
+- 丢失窗口契约（export 模式）：游戏 worker 崩溃时，最后 ≤30s 未冲刷的脏快照随进程内存消失——但在线态可从
+  Redis 即时恢复（背包权威已在 `nythros:bag:*`），真正丢的是未冲刷窗口的增量；这是吞吐与持久性的既有取舍
+  （裁决 4），运维用「宕机即公告 + 补偿邮件」承接，不要试图用加锁消除；
+- exporter 失联 = 报表老化不回档：发布侧 MAXLEN 保险丝 + 消费侧 XTRIM 双治理；Redis 崩溃时未落 MySQL 的
+  增量回退到最近归档——监控必须对 exporter 存活、`XLEN` 积压与 `[run-exporter]` 日志告警，必要时重启 exporter
+  续消费（PEL 未 ack 条目自动重放，at-least-once）；
+- MySQL 长时间不可用时 exporter 存活但 upsert 持续失败（条目滞留 PEL，恢复后重放）——不影响游戏侧帧延迟。
 
 ## 8. 发布与仓库形态
 

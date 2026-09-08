@@ -21,6 +21,37 @@
 
 ### Added
 
+- **「Redis 管热数据、MySQL 只落盘」持久化模型（worker 零 PDO）**：①背包换 Redis 权威
+  `RedisInventoryStore`（`nythros:bag:{uid}` hash,快照覆盖写 = pipeline 单往返,attach 恢复主路径,与
+  CurrencyLedger 同风格);②持久化管线抽契约 `PersistPipelineInterface`(+`bindTimer` fork 后绑定,修正
+  `scheduleFlushId` 紧急合并窗在 demo 装配中 timer 恒 null 从不 arm 的潜伏缺陷——bindTimer 同时启用
+  合并窗与 30s 兜底,幂等);新实现 `RedisExportPipeline`:markDirty 零 I/O→冲刷点一条 pipeline 同窗写
+  背包 hash + XADD 导出 Stream(`nythros:export:players`,MAXLEN 近似保险丝),worker 进程内不出现 \PDO;
+  ③新部署角色 **storage-exporter**（deploy.yaml `type: storage`,单消费者消费组落 `nythros_archive`,
+  复用 `MySqlStorage::saveBatch` 不自造 SQL;at-least-once:失败不 ack→PEL 重放,毒消息 ack+日志;
+  `run-exporter.php --self-test` 离线自检;count>1 硬降 1 保 Stream 全序前提);④demo 双模式
+  `NYTHROS_PERSIST_MODE`（缺省 `export`,export 下 attach 恢复读背包权威缺省开;`mysql` 保留旧直写口径,
+  ArchivePipeline 与测试线束零改动）;bin/server `--parts` 增 `storage`,启动铁序 Redis→social→map→storage。
+  失败模式预案与丢失窗口契约写进 deployment §3/§6/§7.3（exporter 失联=报表老化不回档;worker 崩溃=
+  丢 ≤30s 未冲刷增量,在线态 Redis 可恢复）。验证:新增 13 测（Inventory/ExportPipeline 契约 + 两形态
+  phpredis 回复归一化实测校准——xReadGroup 实为 [stream=>[entryId=>fields]]）;E2E 带 exporter 实跑
+  `verify-phase5` 11/11、`verify-mmorpg` 11/11（step8 领奖直查 MySQL potion=4 为导出链路铁证）。
+- **热路径同步 IO 剥离（「每 tick/每消息主循环零往返」纪律化）**：①任务进度写回缓冲
+  `CachedQuestStore`（framework Quest，内存装饰器：attach 预热整批载入 / combat.kill·pickup 驱动
+  的 advance 读写全走内存 / detach 回写+淘汰 / 30s 定时兜底,批量化经新增能力接口
+  `QuestBatchStoreInterface::saveMany`——RedisQuestStore 按 uid 归组 hMSet、跨 uid pipeline 合并为
+  1 往返,未实现者自动逐条回落;崩溃丢失窗口 = 距上次冲刷,与归档裁决 4 同口径）;
+  ②归档断连/登出 `ArchivePipeline::scheduleFlushId` 紧急合并窗（0.2s 窗口内到齐的脏记录并成
+  一次 saveBatch——掉线风暴把 N 条串行 MySQL 往返压成 1,断连处理器零往返;`flushId` 保留为
+  强制同步点旧语义,无定时器装配自动回落）;③登录链读聚合:`RedisServiceRegistry::discover`
+  心跳存活检查 exists 由逐实例串行（1+N 往返）改单条 pipeline,惰性回收合并批量、正常路径
+  零回收往返,过滤/回收语义逐条对齐（P14/33 §11 验收网保持）;`RedisTeamStore::get` 的
+  leaderUid/members 双 hGet 合并为单 hMGet。门禁 `tools/check-io-free-path.php`（composer io-free
+  + CI 步骤）:12 个热路径源文件出现 `\Redis`/`\PDO`/`Redis::` 客户端引用即 FAIL——守护本纪律
+  （blueprint/33 压测证实的唯一热路径 IO 违规 combat.kill→QuestService 同步链就此闭环）;
+  best-practices §1 补写回缓冲纪律与强一致例外区清单（货币/竞拍/票据保持同步,勿缓冲化）;
+  E2E 回归:`verify-phase5` 11/11、`verify-mmorpg` 11/11（任务链运行时/领奖/落库复核步骤全走
+  CachedQuestStore 实链路）,combat.kill→QuestService 同步链为审计发现的首例热路径 IO 违规、就此闭环。
 - 稳定性演练器：`benchmarks/soak-map.php`（长跑 + RSS 斜率泄漏哨兵 + 认证率/帧率裁决）、
   `benchmarks/fault-drill.php`（redis-down/mysql-down/kill9 故障矩阵）、共享编排库
   `benchmarks/lib/drill-harness.php`（最小 RFC6455 客户端 + 服务栈托管 + 运行期采样）；CI 新增 soak 冒烟门禁。

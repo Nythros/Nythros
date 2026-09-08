@@ -50,7 +50,7 @@ use Nythros\Framework\Inventory\Equipment\Equipment;
 use Nythros\Framework\Mail\MailNotifierInterface;
 use Nythros\Framework\Mail\MailService;
 use Nythros\Framework\Matching\MatchingService;
-use Nythros\Framework\Persistence\ArchivePipeline;
+use Nythros\Framework\Persistence\PersistPipelineInterface;
 use Nythros\Framework\Plugin\Item\ItemDefinition;
 use Nythros\Framework\Plugin\Item\ItemRepository;
 use Nythros\Framework\Plugin\Skill\SkillDefinition;
@@ -195,7 +195,10 @@ final class MapServer extends RealtimeServer implements VisionBroadcasterInterfa
      * @param ?DropTable $dropTable 掉落表（spawnMonster 注入 MonsterActor 用） Drop table (injected into MonsterActor by spawnMonster)
      * @param ?EntityTypeIndex $typeIndex 实体类型索引（auth/spawnMonster 登记、cleanup/死亡摘除） Entity type index (registered on auth/spawnMonster, removed on cleanup/death)
      * @param array<string, Inventory> $inventories 初始玩家背包表 entityId => Inventory（auth 时缺失键自动补建） Initial player-inventory table entityId => Inventory (missing keys are auto-created on auth)
-     * @param ?ArchivePipeline $archive 归档管线；缺省 null = 不持久化（pickup 后标脏背包） Archive pipeline; default null = no persistence (inventory marked dirty after pickup)
+     * @param ?PersistPipelineInterface $archive 持久化管线（ArchivePipeline=MySQL 直写旧口径 /
+     *   RedisExportPipeline=Redis 权威+Stream 导出口径）；缺省 null = 不持久化（pickup 后标脏背包）
+     *   Persistence pipeline (ArchivePipeline = the legacy direct-MySQL path / RedisExportPipeline = the
+     *   Redis-authoritative + Stream-export path); default null = no persistence (inventory marked dirty after pickup)
      * @param ?SkillRepository $skills 技能注册表（skill:cast 前置校验用） Skill repository (used for skill:cast pre-validation)
      * @param ?RandomSourceInterface $random 随机源；缺省 null = SystemRandomSource Random source; default null = SystemRandomSource
      * @param ?float $snapshotResyncIntervalSeconds 视野快照周期重同步间隔（秒）；缺省 null = 关闭（单测/纯消息模式） Periodic vision-snapshot resync interval in seconds; default null = off (unit-test/message-only mode)
@@ -228,7 +231,7 @@ final class MapServer extends RealtimeServer implements VisionBroadcasterInterfa
         private ?DropTable $dropTable = null,
         private readonly ?EntityTypeIndex $typeIndex = null,
         array $inventories = [],
-        private readonly ?ArchivePipeline $archive = null,
+        private readonly ?PersistPipelineInterface $archive = null,
         private readonly ?SkillRepository $skills = null,
         ?RandomSourceInterface $random = null,
         private readonly ?float $snapshotResyncIntervalSeconds = null,
@@ -378,7 +381,10 @@ final class MapServer extends RealtimeServer implements VisionBroadcasterInterfa
         }
 
         if ($timer !== null && $this->archive !== null) {
-            $timer->add(ArchivePipeline::FLUSH_INTERVAL_SECONDS, $this->archive->periodicFlush(...), true);
+            // fork 后统一交给管线自己 arm（30s 兜底 + 紧急合并窗;bindTimer 幂等,与组装层重复调用安全）
+            // After fork the pipeline arms itself (30s fallback + urgent window; bindTimer is idempotent, so a
+            // duplicate call from the assembly stays safe)
+            $this->archive->bindTimer($timer);
         }
 
         if ($timer !== null && $this->snapshotResyncIntervalSeconds !== null) {
@@ -1507,6 +1513,13 @@ final class MapServer extends RealtimeServer implements VisionBroadcasterInterfa
         $this->mountPlayer($conn, $entity, $actor);
         $this->playerCount++;
 
+        // 任务进度会话预热（主循环 IO 剥离）：attach 时一次性载入该 uid 全部进度进写回缓冲，令后续
+        // combat.kill/pickup 驱动的任务进度读写全走内存（QuestService 无写回后端时零操作）。
+        // Quest-progress session preload (the hot-path IO strip): at attach the uid's whole progress set is loaded
+        // into the write-back buffer, so the later combat.kill/pickup-driven quest reads/writes stay in memory
+        // (a no-op for QuestService without a write-back backend).
+        $this->quests?->preload($record->uid);
+
         $this->send($conn, Message::create('auth_ok', ['uid' => $record->uid, 'id' => $entityId], $message->requestId));
     }
 
@@ -1526,11 +1539,15 @@ final class MapServer extends RealtimeServer implements VisionBroadcasterInterfa
     {
         if (isset($this->actors[$entityId])) {
             $actor = $this->actors[$entityId];
-            // 断连立即冲刷（A-4 落库断链修复）：玩家断连时把标脏背包立即落库（键取 uid()）；怪物 Actor 无 uid 跳过
-            // Immediate disconnect flush (A-4 persistence-chain fix): a disconnecting player's dirty inventory is saved at once
-            // (keyed by uid()); monster actors carry no uid and are skipped
+            // 断连冲刷（A-4 落库断链修复 + 主循环 IO 剥离）：玩家断连时把标脏背包登记进归档紧急队列，
+            // 0.2s 合并窗并成一次 saveBatch——断连处理器零 MySQL 往返，掉线风暴不放大（键取 uid()）；
+            // 怪物 Actor 无 uid 跳过。
+            // Disconnect flush (the A-4 persistence-chain fix + the hot-path IO strip): the disconnecting player's
+            // dirty inventory is registered into the archive's urgent queue, coalesced into one saveBatch by the
+            // 0.2s window — the disconnect handler does zero MySQL round-trips and a mass-disconnect storm never
+            // amplifies (keyed by uid()); monster actors carry no uid and are skipped.
             if ($actor instanceof PlayerActor && $actor->uid() !== null) {
-                $this->archive?->flushId($actor->uid());
+                $this->archive?->scheduleFlushId($actor->uid());
 
                 // 迁移快照导出（P15 / ADR-025 方案 C）：detach 时把世界本地状态（位置/血量/背包）写入转移票据，
                 // 目的端 attach 时原子消费重建——重连、换频道、切图共用同一导出路径；store 未装配零操作。
@@ -1539,6 +1556,13 @@ final class MapServer extends RealtimeServer implements VisionBroadcasterInterfa
                 // destination's attach — reconnect, channel switch and map switch all share this one export path; a
                 // store-less assembly is a no-op.
                 $this->exportTransferSnapshot($entityId, $actor);
+
+                // 任务进度会话收尾（写回缓冲）：回写本场未冲刷的脏进度并释放缓冲——每连接级同步点
+                // （与上方 flushId/票据导出同口径），使任务进度在战斗/拾取每消息路径零 IO。
+                // Quest-progress session close-out (the write-back buffer): unflushed dirty progress is written back
+                // and the buffer released — a per-connection sync point (the same tier as the flushId/ticket export
+                // above), keeping quest progress at zero IO on the per-message combat/pickup path.
+                $this->quests?->evict($actor->uid());
             }
             $this->actorSystem->remove($actor);
             unset($this->actors[$entityId]);
@@ -2682,9 +2706,11 @@ final class MapServer extends RealtimeServer implements VisionBroadcasterInterfa
     }
 
     /**
-     * 登出处理（A-6 落库断链修复）：取 PlayerActor uid 立即冲刷标脏背包后关闭连接——客户端主动登出是强制同步点。
-     * Logout handling (A-6 persistence-chain fix): flushes the dirty inventory immediately by the PlayerActor uid, then
-     * closes the connection — an explicit client logout is a forced sync point.
+     * 登出处理（A-6 落库断链修复 + 主循环 IO 剥离）：取 PlayerActor uid 把标脏背包登记进归档紧急
+     * 合并队列后关闭连接——显式登出仍是持久化同步点,但实际落库由 0.2s 合并窗的批量冲刷承担。
+     * Logout handling (the A-6 persistence-chain fix + the hot-path IO strip): the dirty inventory keyed by the
+     * PlayerActor uid is registered into the archive's urgent coalescing queue and the connection closes — an
+     * explicit logout stays a persistence sync point, but the actual save rides the batch flush of the 0.2s window.
      */
     private function handleLogout(ConnectionInterface $conn): void
     {
@@ -2697,7 +2723,12 @@ final class MapServer extends RealtimeServer implements VisionBroadcasterInterfa
 
         $actor = $this->actors[$entityId] ?? null;
         if ($actor instanceof PlayerActor && $actor->uid() !== null) {
-            $this->archive?->flushId($actor->uid());
+            // 登出登记进紧急合并队列（与断连同口径）：close 触发的 onEntityCleanedUp 会幂等重登记，
+            // 合并窗到点一次 saveBatch——登出处理路径零 MySQL 往返。
+            // The logout registers into the urgent coalescing queue (same tier as disconnect): the onClose that
+            // follows re-registers idempotently via onEntityCleanedUp, and the window flushes once — the logout
+            // handler does zero MySQL round-trips.
+            $this->archive?->scheduleFlushId($actor->uid());
         }
 
         $conn->close();

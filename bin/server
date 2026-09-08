@@ -16,7 +16,7 @@ declare(strict_types=1);
 // Map workers register, the social tier discovers and assigns).
 //
 // 用法 / Usage:
-//   php bin/server start      [deploy.yaml] [--parts=all|social|maps]   启动（Ctrl+C 停止）
+//   php bin/server start      [deploy.yaml] [--parts=all|social|maps|storage]   启动（Ctrl+C 停止）
 //   php bin/server status     [deploy.yaml]                             查看运行清单
 //   php bin/server stop       [deploy.yaml]                             逆序优雅停（Map → Social）
 //   --parts：all（缺省，起 social 与 maps 声明组）/ social（只起社交组）/ maps（只起地图/副本组）。
@@ -104,8 +104,8 @@ function parseCli(array $argv): array
         $configPath = $arg;
     }
     $configPath ??= projectRoot() . '/packages/demo/config/deploy.yaml';
-    if (!in_array($parts, ['all', 'social', 'maps'], true)) {
-        throw new \InvalidArgumentException('[server] --parts 必须是 all|social|maps');
+    if (!in_array($parts, ['all', 'social', 'maps', 'storage'], true)) {
+        throw new \InvalidArgumentException('[server] --parts 必须是 all|social|maps|storage');
     }
 
     return ['command' => $command, 'config' => $configPath, 'parts' => $parts];
@@ -191,6 +191,27 @@ function buildServices(DeployConfig $config, string $parts, string $configPath):
             $services[] = [
                 'name' => 'maps',
                 'cmd' => [PHP_BINARY, $root . '/bin/start-maps.php', $configPath],
+                'env' => getenv(),
+            ];
+        }
+    }
+
+    // 存储导出组（可选）：type=storage 的 service 逐实例 spawn run-exporter.php——消费 Redis Stream
+    // （RedisExportPipeline 发布的脏快照）落 MySQL,游戏 worker 进程内零 PDO（「Redis 管热数据、MySQL 只落盘」模型）
+    // Storage exporter group (optional): one run-exporter.php spawn per storage service — it consumes the Redis Stream
+    // published by RedisExportPipeline (dirty snapshots) into MySQL, so game workers hold zero PDO (the "Redis holds
+    // hot data, MySQL is only the durable sink" model)
+    if (in_array($parts, ['all', 'storage'], true)) {
+        $storageWorkers = array_filter(
+            $config->workers(),
+            static fn ($worker): bool => $worker->service->type === 'storage',
+        );
+        $storageIndex = 0;
+        foreach ($storageWorkers as $worker) {
+            $storageIndex++;
+            $services[] = [
+                'name' => 'exporter-' . $storageIndex,
+                'cmd' => DeployConfig::buildCommand($worker, $root . '/packages/demo/bin/run-exporter.php', $redis, $config->mysql()),
                 'env' => getenv(),
             ];
         }
@@ -425,7 +446,7 @@ try {
     $cli = parseCli($argv);
 } catch (\Throwable $e) {
     fwrite(STDERR, '[server] 错误: ' . $e->getMessage() . "\n");
-    fwrite(STDERR, "用法 / Usage: php bin/server <start|status|stop> [deploy.yaml] [--parts=all|social|maps]\n");
+    fwrite(STDERR, "用法 / Usage: php bin/server <start|status|stop> [deploy.yaml] [--parts=all|social|maps|storage]\n");
     exit(1);
 }
 
@@ -446,6 +467,6 @@ try {
     exit(0);
 } catch (\Throwable $e) {
     fwrite(STDERR, '[server] 错误: ' . $e->getMessage() . "\n");
-    fwrite(STDERR, "用法 / Usage: php bin/server <start|status|stop> [deploy.yaml] [--parts=all|social|maps]\n");
+    fwrite(STDERR, "用法 / Usage: php bin/server <start|status|stop> [deploy.yaml] [--parts=all|social|maps|storage]\n");
     exit(1);
 }

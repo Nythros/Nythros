@@ -85,3 +85,14 @@ processes:
       channelId: pool-1
       worldType: full
       port: 18084
+  storage:                     # 存储导出单元（「Redis 管热数据、MySQL 只落盘」模型）：
+                               # Storage exporter unit (the "Redis holds hot data, MySQL is only the durable sink" model):
+                               # type=storage 由 bin/server spawn run-exporter.php——消费 RedisExportPipeline 发布的
+                               # nythros:export:players Stream 落 MySQL 归档；游戏 worker 进程内零 PDO。
+                               # 单消费者是一致性前提（Stream 追加序=全序）；port 18300 仅作 pidFile/观测键,不监听。
+                               # A storage service makes bin/server spawn run-exporter.php, consuming the
+                               # nythros:export:players Stream published by RedisExportPipeline into MySQL — game
+                               # workers hold zero PDO. Single-consumer is the consistency premise (append order =
+                               # total order); port 18300 only keys the pidFile/observability, nothing listens on it.
+    - type: storage
+      port: 18300

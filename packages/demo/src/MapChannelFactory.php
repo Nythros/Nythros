@@ -43,12 +43,14 @@ use Nythros\Framework\Gm\Command\DrainCommand;
 use Nythros\Framework\Gm\Command\KickCommand;
 use Nythros\Framework\Gm\Command\StatusCommand;
 use Nythros\Framework\Gm\GmCommandBus;
+use Nythros\Framework\Inventory\RedisInventoryStore;
 use Nythros\Framework\Mail\MailService;
 use Nythros\Framework\Mail\RedisMailStore;
 use Nythros\Framework\Matching\MatchCriteria;
 use Nythros\Framework\Matching\MatchingService;
 use Nythros\Framework\Observability\PerfSampler;
 use Nythros\Framework\Persistence\ArchivePipeline;
+use Nythros\Framework\Persistence\RedisExportPipeline;
 use Nythros\Framework\Plugin\Buff\BuffDefinition;
 use Nythros\Framework\Plugin\Buff\BuffPlugin;
 use Nythros\Framework\Plugin\Buff\BuffRepository;
@@ -58,6 +60,7 @@ use Nythros\Framework\Plugin\Item\ItemRepository;
 use Nythros\Framework\Plugin\PluginRegistry;
 use Nythros\Framework\Plugin\Skill\SkillPlugin;
 use Nythros\Framework\Plugin\Skill\SkillRepository;
+use Nythros\Framework\Quest\CachedQuestStore;
 use Nythros\Framework\Quest\QuestChain;
 use Nythros\Framework\Quest\QuestDefinition;
 use Nythros\Framework\Quest\QuestRepository;
@@ -279,11 +282,26 @@ final class MapChannelFactory
             ? new SeededRandomSource((int) trim($rawSeed))
             : new SystemRandomSource();
 
-        // 归档管线：pickup 背包变更经 markDirty 标脏；存储为 MySqlStorage（lazy PDO 工厂，worker 进程内首用建连）；
-        // 30s 兜底定时器与建表在 onWorkerStart 内注册（fork 后执行，幂等），断连/登出 flush 由 MapServer 触发。
-        // Archive pipeline: pickup inventory changes are marked dirty via markDirty; the storage is MySqlStorage (lazy PDO
-        // factory); the 30s fallback timer and schema creation are registered in onWorkerStart (after fork, idempotent).
-        $archive = new ArchivePipeline(new MySqlStorage($pdoFactory), 'players');
+        // 持久化管线双模式（NYTHROS_PERSIST_MODE，缺省 export）：
+        // - export（目标口径）：背包权威落 Redis（nythros:bag:{uid}），脏快照 XADD 进导出 Stream，
+        //   由 storage-exporter 独立进程消费落 MySQL——map worker 进程内零 PDO，MySQL 抖动不再是帧问题；
+        // - mysql（旧口径/回退开关）：ArchivePipeline 直写 MySqlStorage（worker 内 lazy PDO），行为与本改造前一致。
+        // Persistence dual mode (NYTHROS_PERSIST_MODE, default export):
+        // - export (the target path): the inventory is authoritative in Redis (nythros:bag:{uid}) and dirty snapshots
+        //   are XADD'd onto the export Stream, consumed by the standalone storage-exporter worker into MySQL — zero PDO
+        //   inside the map worker, so MySQL latency spikes are no longer frame problems;
+        // - mysql (the legacy/fallback path): ArchivePipeline writes MySqlStorage (lazy PDO in-worker) exactly as before.
+        $persistMode = getenv('NYTHROS_PERSIST_MODE') ?: 'export';
+        if ($persistMode === 'export') {
+            $inventoryStore = new RedisInventoryStore($redisFactory);
+            // timer 缺省 null：Workerman 定时器 fork 前不可挂（子进程重复继承注册）,
+            // onWorkerStart 内统一 bindTimer（同时启用紧急合并窗 + 30s 兜底）
+            // timer stays null pre-fork (Workerman timers must not be armed before fork — children re-inherit the
+            // registration); onWorkerStart calls bindTimer once, arming both the urgent window and the 30s fallback.
+            $archive = new RedisExportPipeline($redisFactory, $inventoryStore, RedisExportPipeline::DEFAULT_STREAM_KEY, null);
+        } else {
+            $archive = new ArchivePipeline(new MySqlStorage($pdoFactory), 'players');
+        }
 
         // R2 房间装配（ADR-024 starter-kit 接线）：NYTHROS_ROOMS=1 启用，缺省关闭——存量部署零影响。
         // 房间管理器注入宿主事件总线（信封统一队列、帧末统一 flush，ADR-024 §D-A）。
@@ -378,10 +396,13 @@ final class MapChannelFactory
             ? (int) trim($rawCapacity)
             : 0;
 
-        // P18 归档恢复开关：NYTHROS_ARCHIVE_RESTORE=1 启用（缺省关闭——存量验收依赖逐跑全新背包）。
-        // The P18 archive-restore switch: enabled via NYTHROS_ARCHIVE_RESTORE=1 (off by default — existing
-        // acceptance depends on a per-run fresh inventory).
-        $archiveRestore = getenv('NYTHROS_ARCHIVE_RESTORE') === '1';
+        // P18 归档恢复开关：NYTHROS_ARCHIVE_RESTORE=1 启用（mysql 旧模式缺省关闭——存量验收依赖逐跑全新背包）。
+        // export 模式下 Redis 背包 hash 是权威,attach 恢复读是模型题中之义——缺省开,=0 可关。
+        // The P18 archive-restore switch: in mysql mode opt-in via NYTHROS_ARCHIVE_RESTORE=1 (off by default —
+        // existing acceptance depends on a per-run fresh inventory). In export mode the Redis bag hash IS the
+        // authority, so the attach restore is part of the model — on by default, NYTHROS_ARCHIVE_RESTORE=0 opts out.
+        $archiveRaw = getenv('NYTHROS_ARCHIVE_RESTORE');
+        $archiveRestore = $persistMode === 'export' ? $archiveRaw !== '0' : $archiveRaw === '1';
 
         $map = new MapServer(
             $server,
@@ -566,14 +587,25 @@ final class MapChannelFactory
             // P4c progress persistence: the in-process InMemoryQuestStore gives way to RedisQuestStore (a
             // cross-process persistent backend — progress survives server restarts, kill/collect/talk progress and
             // the claim flag all persist; the key family shares the social-state prefix, see RedisQuestStore).
-            $quests = new QuestService(new RedisQuestStore($redisFactory), $questRepository, $mmorpgConfig->questChains ?? []);
+            // 热路径 IO 剥离：RedisQuestStore 外包一层 CachedQuestStore 写回缓冲——combat.kill/pickup 驱动的
+            // 进度读写全走内存，后端往返只发生在 attach 预热 / detach 淘汰 / 30s 兜底（下方定时器）三个每连接
+            // 级/周期级同步点。崩溃丢失窗口 = 距上次冲刷（与 ArchivePipeline 裁决 4 同口径）。
+            // Hot-path IO strip: the RedisQuestStore rides behind a CachedQuestStore write-back buffer — the
+            // combat.kill/pickup-driven progress reads/writes stay in memory, and backend round-trips happen only at
+            // the three per-connection / periodic sync points: the attach preload, the detach evict and the 30s
+            // backstop below. The crash-loss window equals the time since the last flush (the same ruling as
+            // ArchivePipeline's ruling 4).
+            $quests = new QuestService(new CachedQuestStore(new RedisQuestStore($redisFactory)), $questRepository, $mmorpgConfig->questChains ?? []);
             $quests->attachDispatcher($combatEvents);
 
             $map->attachGameplay($buffs, $cooldowns, $matching, $quests);
 
-            // 玩法批定时器：Buff tick 0.5s（到期/DOT）；匹配兜底撮合 1s。
-            // Gameplay timers: a 0.5s buff tick (expiry/DOT); a 1s matching backstop sweep.
-            $server->onWorkerStart(static function () use ($timer, $buffs, $map): void {
+            // 玩法批定时器：Buff tick 0.5s（到期/DOT）；匹配兜底撮合 1s；任务进度写回兜底 30s
+            // （与归档兜底同节奏——会话内脏进度不只有 detach 一条回写路，长会话也保证有界丢失窗口）。
+            // Gameplay timers: a 0.5s buff tick (expiry/DOT); a 1s matching backstop sweep; a 30s quest write-back
+            // backstop (the same cadence as the archive fallback — detach is not the only write-back route for a
+            // session's dirty progress; long sessions keep the loss window bounded too).
+            $server->onWorkerStart(static function () use ($timer, $buffs, $map, $quests): void {
                 $timer->add(0.5, static function () use ($buffs, $map): void {
                     $buffs->tick(microtime(true), static function (string $hostKey) use ($map): ?BasePlayer {
                         $actor = $map->getActor($hostKey);
@@ -583,6 +615,9 @@ final class MapChannelFactory
                 }, true);
                 $timer->add(1.0, static function () use ($map): void {
                     $map->sweepMatching();
+                }, true);
+                $timer->add(ArchivePipeline::FLUSH_INTERVAL_SECONDS, static function () use ($quests): void {
+                    $quests->flushPending();
                 }, true);
             });
         }
@@ -675,17 +710,23 @@ final class MapChannelFactory
         // Worker-process initialization (after fork, idempotent): schema creation + initial monster spawn + the
         // performance-sampling timer. Coexists with MapServer::register()'s own onWorkerStart handler (the server
         // appends multiple handlers); monsters spawn only once the loop is up so their birth broadcast is receivable.
-        $server->onWorkerStart(static function () use ($pdoFactory, $map, $redisFactory, $timer, $serviceId, $archive, $gameplayConfig): void {
+        $server->onWorkerStart(static function () use ($pdoFactory, $map, $redisFactory, $timer, $serviceId, $archive, $gameplayConfig, $persistMode): void {
             // 注意：文件级闭包不自动捕获外部变量——$pdoFactory 必须显式 use，否则 fork 后执行时是 null（部署路径实测踩坑）
             // Note: file-scope closures never auto-capture outer variables — \$pdoFactory must be explicitly `use`d
-            MySqlStorage::createSchema($pdoFactory(), MySqlStorage::DEFAULT_TABLE);
+            // export 模式下 worker 不持 MySQL（schema 归 storage-exporter 建）；mysql 旧模式保持建表。
+            // In export mode the worker holds no MySQL (the schema is the storage-exporter's); the legacy mode keeps it.
+            if ($persistMode !== 'export') {
+                MySqlStorage::createSchema($pdoFactory(), MySqlStorage::DEFAULT_TABLE);
+            }
 
-            // 归档 30s 兜底定时器（P5b 落实设计意图）：ArchivePipeline 在 fork 前构造（timer 缺省 null），
-            // 周期兜底在此注册——断连/登出同步点之外的有界丢失窗口由定时批量 saveBatch 兜底（ADR-013 10.5 裁决 4）。
-            // The archive 30s fallback timer (the P5b design-intent fulfillment): the pipeline is constructed before
-            // the fork (timer defaults to null), so the periodic fallback registers here — the bounded-loss window
-            // beyond the disconnect/logout sync points is backstopped by the timed batch saveBatch (ADR-013 10.5, ruling 4).
-            $timer->add(ArchivePipeline::FLUSH_INTERVAL_SECONDS, $archive->periodicFlush(...), true);
+            // 归档兜底定时器（P5b 落实设计意图 + bindTimer 修正）：管线 fork 前构造（timer 缺省 null），
+            // onWorkerStart 内 bindTimer 统一启用——30s 周期兜底 + scheduleFlushId 紧急合并窗
+            // （此前手动只注册周期回调,timer 属性恒 null 使合并窗从不生效——bindTimer 一并修正）。
+            // The archive fallback timer (the P5b intent + the bindTimer fix): pipelines are constructed pre-fork
+            // with timer=null, so onWorkerStart calls bindTimer once — it arms the 30s periodic fallback AND
+            // scheduleFlushId's urgent window (previously only a manual periodic callback was registered while the
+            // timer property stayed null, so the coalescing window never actually armed — bindTimer closes that gap).
+            $archive->bindTimer($timer);
 
             // 初始怪物 spawn（地图初始化路径，monster:spawned 出生事件一次广播；服务器就绪后才出生，广播可达）。
             // 锚点/血量/巡逻域/逐怪重生延迟全部来自 gameplay 表（P11 数据外置；缺省值即下述 R4 实测对齐结果）。

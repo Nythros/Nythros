@@ -5,7 +5,7 @@
 > 未标 `@internal` 的类/枚举（ADR-023/024）。`@internal` 实现类不构成 API 承诺，业务层只依赖 Contracts 接口。
 > 指南（用法与教程）见 [docs/ 索引](https://github.com/nythros/nythros/tree/master#文档索引)；本文件只做「有什么、叫什么、签名单什么」的索引。
 > 摘要中的 P 编号（P9/P11/P15…）是阶段验收记录的追溯锚点，对应 [blueprint/](https://github.com/nythros/nythros/tree/master/blueprint) 目录的编号验收文档。
-163 个公开符号（engine + framework）。
+168 个公开符号（engine + framework）。
 
 
 ## nythros/engine
@@ -1109,6 +1109,23 @@ status 命令：回服务状态快照（数据来自注入的 GmStatusProviderIn
 | `execute(array $payload): Nythros\Framework\Gm\GmResult` |  |
 | `name(): string` |  |
 
+### `Nythros\Framework\Inventory`
+
+#### `RedisInventoryStore`
+背包 Redis 权威实现：玩家物品清单存在 Redis hash（itemId => count），与 CurrencyLedger 同风格。
+
+| 方法 | 说明 |
+|---|---|
+| `__construct(Redis\|Closure $redis, string $prefix = 'nythros:bag:')` | 构造背包 Redis 权威存储。 |
+| `add(string $uid, string $itemId, int $count): void` | 增加物品（正数；0/负数异常）。 |
+| `count(string $uid, string $itemId): int` | 查询某物品数量。 |
+| `delete(string $uid): void` | 移除某 uid 全部背包键（测试/长期离线清理）. Delete the whole bag key for a uid (test / long-offline cleanup). |
+| `static` `hydrate(array $items): Nythros\Framework\Inventory` | 把快照数组水化为进程内 Inventory 对象（attach 恢复消费；无状态工具方法）。 |
+| `keyFor(string $uid): string` | 背包键访问器（导出管线在共享 pipeline 中直写此键时使用;键构造唯一事实源仍是本类）。 |
+| `load(string $uid): array` | 读取整表。 |
+| `remove(string $uid, string $itemId, int $count): bool` | 移除物品（正数；不足时原子拒绝，返回 false；扣至 0 自动 HDEL）。 |
+| `save(string $uid, array $items): void` | 用给定快照覆盖整表（供 attach 从转移票据/归档恢复，或导出回灌；空数组即清空）。 |
+
 ### `Nythros\Framework\Inventory\Equipment`
 
 #### `Equipment`
@@ -1265,16 +1282,48 @@ make:skill — 生成技能定义条目并追加到技能配置（config/skills.
 ### `Nythros\Framework\Persistence`
 
 #### `ArchivePipeline`
-归档管线（组装层通用件）：业务状态异步归档——标脏 → 断连/登出立即 flush → 30s 定时兜底批量 saveBatch（ADR-013 10.5，裁决 4/6）。
+归档管线（组装层通用件）：业务状态异步归档——标脏 → 断连/登出立即 flush → 30s 定时兜底批量 saveBatch（ADR-013 10.5，裁决 4/6）。 · implements `Nythros\Framework\Persistence\PersistPipelineInterface`
 
 | 方法 | 说明 |
 |---|---|
 | `__construct(Nythros\Persistence\StorageInterface $storage, string $collection, ?Nythros\Contracts\TimerInterface $timer = NULL, ?callable $clock = NULL)` | 组装归档管线。 |
+| `bindTimer(?Nythros\Contracts\TimerInterface $timer): void` | fork 后绑定定时器（组装层 onWorkerStart 内调用）：把构造期缺省的 null timer 换成进程内真实定时器, |
 | `flush(): void` | 批量冲刷全部脏记录（saveBatch）：成功记录出脏；失败 id 计一次尝试，未达上限留待重试， |
 | `flushId(string $id): void` | 断连/登出立即冲刷：立即 save 该记录（强制同步点，不受 30s 门控影响）；save 失败时计一次 |
+| `flushUrgent(): void` | 合并窗到期回调：清空队列并把其中仍脏的记录一次 saveBatch（强制同步点口径：不推进 lastFallbackAt， |
 | `load(string $id): ?array` | 读路径（P18 工程债收尾：关闭「归档只写」的半闭环）：按 id 读取最近一次归档的记录—— |
 | `markDirty(string $id, array $data): void` | 标脏：登记最新状态（同 id 覆盖写）并清零失败计数；零 I/O，不阻塞帧预算（裁决 4）。 |
 | `periodicFlush(): void` | 定时兜底回调（30s 持久定时器）：时钟门控——距上次兜底冲刷不足 30s 直接返回；否则推进 |
+| `scheduleFlushId(string $id): void` | 断连/登出的合并冲刷入口（主循环 IO 剥离）：把 id 登记进紧急队列并挂一次性合并窗定时器， |
+
+#### `Nythros\Framework\Persistence\PersistPipelineInterface`
+玩家状态持久化管线的公开契约（MapServer 侧的写回/恢复门面）。
+
+| 方法 | 说明 |
+|---|---|
+| `bindTimer(?Nythros\Contracts\TimerInterface $timer): void` | 绑定 fork 后定时器（组装层 onWorkerStart 内调用）：启用紧急合并窗 + 注册周期兜底；幂等。 |
+| `flush(): void` | 立即批量冲刷全部脏记录（强制同步点，如 onStop 收尾）。 |
+| `flushId(string $id): void` | 强制同步冲刷单条记录；未标脏空操作。 |
+| `load(string $id): ?array` | attach 恢复读路径：按 id 读取最近持久化记录；失败/无记录 null。 |
+| `markDirty(string $id, array $data): void` | 标脏：登记最新状态（同 id 覆盖写）。零 I/O，不阻塞帧预算（裁决 4）。 |
+| `periodicFlush(): void` | 定时兜底回调（时钟门控批冲刷，30s）。 |
+| `scheduleFlushId(string $id): void` | 合并冲刷单条记录（生产断连/登出入口）。 |
+
+#### `RedisExportPipeline`
+Redis 权威 + Stream 导出管线（PersistPipelineInterface 的第二实现，worker 零 PDO）。 · implements `Nythros\Framework\Persistence\PersistPipelineInterface`
+
+| 方法 | 说明 |
+|---|---|
+| `__construct(Redis\|Closure $redis, Nythros\Framework\Inventory\RedisInventoryStore $bags, string $streamKey = 'nythros:export:players', ?Nythros\Contracts\TimerInterface $timer = NULL, ?callable $clock = NULL, int $streamMaxLen = 100000)` | 组装管线（应在 worker 进程内构造,fork 后 lazy 建连,与 ArchivePipeline 同口径）。 |
+| `bindTimer(?Nythros\Contracts\TimerInterface $timer): void` | fork 后绑定定时器（与 ArchivePipeline::bindTimer 同规则,幂等）：组装层在 onWorkerStart 调用, |
+| `flush(): void` | {@inheritDoc} 立即批量冲刷全部脏记录（onStop 收尾级强制点;不推进 lastFallbackAt）。 Batch-flushes every dirty record at once (an onStop-grade sync point; does not advance lastFallbackAt). |
+| `flushId(string $id): void` | {@inheritDoc} 强制同步点:立即冲刷单条（未标脏空操作;失败留脏计数）。 Forced sync point: flushes one record at once (no-op when never dirty; failures stay dirty and counted). |
+| `flushUrgent(): void` | 合并窗到期回调（与 ArchivePipeline::flushUrgent 同规则:强制同步点不推进兜底门控）。 |
+| `load(string $id): ?array` | {@inheritDoc} attach 恢复读:读 Redis 背包 hash,组装 archive 同形记录（['inventory'=>items]）;无键 null。 The attach-restore read: loads the Redis bag hash into the archive-shaped record (['inventory'=>items]); null when keyless. |
+| `markDirty(string $id, array $data): void` | {@inheritDoc} 标脏零 I/O:覆盖内存快照并清零失败计数。 Zero-I/O mark-dirty: overwrites the in-memory snapshot and resets the failure counter. |
+| `pendingCount(): int` | 待冲刷记录数（观测/测试用）。 Count of pending records (an observation/test seam). |
+| `periodicFlush(): void` | {@inheritDoc} 30s 时钟门控兜底。 The 30s clock-gated fallback. |
+| `scheduleFlushId(string $id): void` | {@inheritDoc} 合并冲刷:登记紧急队列,0.2s 窗并批;无定时器回落 flushId。 Coalesced flush: enqueues and the 0.2s window batches; without a timer it falls back to flushId. |
 
 ### `Nythros\Framework\Plugin`
 
@@ -1401,8 +1450,23 @@ Skill 插件：向 Container 注册 SkillRepository，并订阅 'skill.cast' 作
 
 ### `Nythros\Framework\Quest`
 
+#### `CachedQuestStore`
+任务进度写回缓冲（主循环 IO 剥离）：QuestStoreInterface 的内存装饰器——把「读穿透 + 写回」的持久化 · implements `Nythros\Framework\Quest\QuestStoreInterface`
+
+| 方法 | 说明 |
+|---|---|
+| `__construct(Nythros\Framework\Quest\QuestStoreInterface $backend, bool $readThrough = true)` | false 时要求先 preload，未载 uid 读返回空——用于「attach 必预热」的装配以杜绝热路径首访往返。 |
+| `all(string $uid): array` |  |
+| `delete(string $uid, string $questId): void` |  |
+| `evict(string $uid): void` | 冲刷并淘汰某 uid（断连/登出会话收尾）：先回写其脏记录（失败的留在 dirty 交 30s 兜底，不丢）， |
+| `flushAll(): bool` | 冲刷全部脏记录：按 uid 批量回写后端（成功清脏、失败留脏待下次兜底），返回是否全部成功。 |
+| `get(string $uid, string $questId): ?Nythros\Framework\Quest\QuestProgress` |  |
+| `hasDirty(string $uid): bool` | 缓存中是否仍存有该 uid 未冲刷的脏记录（观测/测试用）。 |
+| `preload(string $uid): void` | 预热：整批读入某 uid 的全部进度并登记为已载入（不标脏）。幂等——已载入则零往返。 |
+| `save(Nythros\Framework\Quest\QuestProgress $progress): void` |  |
+
 #### `InMemoryQuestStore`
-内存任务进度存储：QuestStoreInterface 的进程内实现（单测与无外部存储部署用）。 · implements `Nythros\Framework\Quest\QuestStoreInterface`
+内存任务进度存储：QuestStoreInterface 的进程内实现（单测与无外部存储部署用）。 · implements `Nythros\Framework\Quest\QuestStoreInterface`, `Nythros\Framework\Quest\QuestBatchStoreInterface`
 
 | 方法 | 说明 |
 |---|---|
@@ -1410,6 +1474,14 @@ Skill 插件：向 Container 注册 SkillRepository，并订阅 'skill.cast' 作
 | `delete(string $uid, string $questId): void` |  |
 | `get(string $uid, string $questId): ?Nythros\Framework\Quest\QuestProgress` |  |
 | `save(Nythros\Framework\Quest\QuestProgress $progress): void` |  |
+| `saveMany(array $progresses): void` |  |
+
+#### `Nythros\Framework\Quest\QuestBatchStoreInterface`
+批量回写能力（可选扩展，能力探测式）：任务进度存储实现方若把多条整记录合并为一次后端往返的能力
+
+| 方法 | 说明 |
+|---|---|
+| `saveMany(array $progresses): void` | 批量整记录回写（whole-record 语义同 save）：空列表零操作；实现方应尽量合并往返。 |
 
 #### `QuestChain`
 任务链配置值对象（R4 mmorpg 类型模块试点 → Quest 子系统）：链式任务聚合——按顺序排列的任务 id 列表，
@@ -1461,6 +1533,9 @@ Skill 插件：向 Container 注册 SkillRepository，并订阅 'skill.cast' 作
 | `attachDispatcher(Nythros\Framework\Event\EventDispatcherInterface $dispatcher): void` | 事件埋点接线：监听 combat.kill / combat.pickup 并驱动对应进度源（组装层在装配后调用一次）。 |
 | `claimReward(string $uid, string $questId, Nythros\Framework\Inventory $inventory): bool` | 领奖：completed 且未领奖时把奖励表逐项入包并置 rewarded；否则 false（幂等）。 |
 | `definitions(): Nythros\Framework\Quest\QuestRepository` | 任务定义注册表（组装层注册定义用）。 |
+| `evict(string $uid): void` | 会话淘汰（断连/登出收尾）：回写该 uid 的未冲刷进度并释放缓冲；非写回后端零操作。 |
+| `flushPending(): void` | 全量兜底冲刷：把所有未回写的脏进度写回后端（供 30s 定时兜底；崩溃丢失窗口的边界，同 ArchivePipeline |
+| `preload(string $uid): void` | 会话预热（写回缓冲接线，主循环 IO 剥离）：委托 store 在入场时一次性载入该 uid 的全部进度—— |
 | `progressOf(string $uid, string $questId): ?Nythros\Framework\Quest\QuestProgress` | 查询某 uid 某任务的进度；无记录返回 null。 |
 | `reportCollect(string $uid, string $itemId, int $count): void` | 收集进度上报：source=collect 且 targetId 匹配的任务按入包数量累计。 |
 | `reportKill(string $uid, string $monsterTypeId): void` | 击杀进度上报：source=kill 且 targetId 匹配的任务计数 +1。 |
@@ -1477,7 +1552,7 @@ Skill 插件：向 Container 注册 SkillRepository，并订阅 'skill.cast' 作
 | `save(Nythros\Framework\Quest\QuestProgress $progress): void` | 保存（整体覆盖语义：以传入进度为准）。 |
 
 #### `RedisQuestStore`
-任务进度存储 Redis 实现（照 GuildStore/FriendStore 先例：\Redis|\Closure 构造 + 键前缀 + 格式白名单， · implements `Nythros\Framework\Quest\QuestStoreInterface`
+任务进度存储 Redis 实现（照 GuildStore/FriendStore 先例：\Redis|\Closure 构造 + 键前缀 + 格式白名单， · implements `Nythros\Framework\Quest\QuestStoreInterface`, `Nythros\Framework\Quest\QuestBatchStoreInterface`
 
 | 方法 | 说明 |
 |---|---|
@@ -1486,6 +1561,7 @@ Skill 插件：向 Container 注册 SkillRepository，并订阅 'skill.cast' 作
 | `delete(string $uid, string $questId): void` |  |
 | `get(string $uid, string $questId): ?Nythros\Framework\Quest\QuestProgress` |  |
 | `save(Nythros\Framework\Quest\QuestProgress $progress): void` |  |
+| `saveMany(array $progresses): void` | 批量整记录回写（QuestBatchStoreInterface）：按 uid 归组，同 uid 多任务合并为一次 hMSet， |
 
 ### `Nythros\Framework\Server`
 
