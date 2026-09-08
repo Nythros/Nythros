@@ -1,8 +1,10 @@
 # 03 · 背包与持久化：打完怪，东西得留下
 
 > **这一阶打通**：拾取进背包（Inventory）、断线/重连/停服后玩家数据不丢（归档管线）。
-> **新用 API**：`Nythros\Framework\Inventory`、`Nythros\Framework\Persistence\ArchivePipeline`、`Nythros\Framework\Combat\DropEntity`、`Nythros\Persistence\{StorageInterface, InMemoryStorage}`（接口与框架服务均公开；两个存储实现类按 0.x 装配现实使用，与 demo 同口径）。
-> **Redis**：不需要（进程内存储起步；MySQL 落库见[持久化指南](../persistence-guide.md)）。
+> **新用 API**：`Nythros\Framework\Inventory`、`Nythros\Framework\Persistence\ArchivePipeline`、`Nythros\Framework\Combat\DropEntity`、`Nythros\Persistence\{StorageInterface, InMemoryStorage}`（接口与框架服务均公开；两个存储实现类按 0.x 装配现实使用）。
+> **Redis**：本章不需要（进程内存储起步）。**注意与 demo 现口径的分叉**：demo 缺省已升级为 export 持久化模式
+> （背包 Redis 权威 + Stream 导出 + storage-exporter 落 MySQL，见 persistence-guide §2.1）；本章按 InMemory→MySQL
+> 直写的教学阶梯走，学完本章再读 §5 的「进阶到 export 模式」即可对齐。
 
 ## 1. 拾取：路由只需要「解析 + 委托」
 
@@ -81,13 +83,25 @@ if (is_array($snapshot) && isset($snapshot['inventory']) && is_array($snapshot['
 2. 断开重连（新 entityId）→ 回读生效：再发个自定义 `bag` 路由确认背包还在；
 3. `InMemoryStorage` 重启必丢（预期内）——把装配换成 `MySqlStorage`（`pdoFactory` + 幂等 `createSchema`，
    步骤见[持久化指南](../persistence-guide.md)）→ 重启后回读成功，这一步做完才算「数据不丢」。
+   （直跑 demo 现栈对照时注意：缺省 export 模式的落库走 storage-exporter，或显式
+   `NYTHROS_PERSIST_MODE=mysql` 回到本章直写口径。）
 
 ## 4. demo 对照与常见坑
 
-- 完整参考：`MapServer::handlePickup`（L2619）与登出冲刷 `handleLogout`（L2684）；
-  装配 `MapChannelFactory` L286；回读开关 `NYTHROS_ARCHIVE_RESTORE=1`（MapServer L260）。
+- 完整参考：`MapServer::handlePickup`（markDirty 标脏）与登出 `handleLogout`（scheduleFlushId 合并窗）；
+  装配双模式选择与恢复开关见 `MapChannelFactory`（`NYTHROS_PERSIST_MODE` / `NYTHROS_ARCHIVE_RESTORE`
+  语义按模式不同——export 缺省开、读 Redis 背包权威；mysql 回退 `=1` 才开、读归档，persistence-guide §2.1/§4）。
 - **坑 1**：在 pickup 路由里直接 `storage->save()`——同步 I/O 进帧，压测必爆。永远只 `markDirty`。
 - **坑 2**：`markDirty` 传增量——管线语义是**最新全量覆盖写**，传 `$inv->all()` 全量。
 - **坑 3**：把 `DropEntity` 当 Actor 从 `getActor()` 找——它是实体，走 `entityManager`。
+
+## 5. 进阶：对齐 demo 缺省的 export 模式（选读）
+
+本章的直写路线在高频拾取下会把 MySQL 往返拖进断连/停机同步点。demo 现缺省把「热状态权威」上移 Redis：
+`markDirty` 语义不变（零 IO），冲刷点改为一条 pipeline 同窗写 Redis 背包 hash（`nythros:bag:{uid}`，attach 恢复首读）
++ 脏快照 `XADD` 导出 Stream，由独立 storage-exporter 进程消费落 MySQL——游戏 worker 零 PDO。
+三步进阶：①装配换 `RedisExportPipeline`（同实现 `PersistPipelineInterface`，业务代码零改动）；
+②`deploy.yaml` 加 `storage` 单元并起 `run-exporter.php`；③backlog/心跳告警接入（deployment §4）。
+原理与取舍见 persistence-guide §2.1 与 best-practices §1。
 
 下一阶：[04 聊天](04-chat.md)——从「一个人的世界」到「一群人的服务器」。

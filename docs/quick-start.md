@@ -116,9 +116,9 @@ php bin/server start
 - `bin/server` 是根编排壳，按 `deploy.yaml` 声明组依次 spawn 两级服务：
   - `social-gateway` / `social-chat` / `social-team` → 逐角色 spawn `packages/demo/bin/run-worker.php --service=<type>`（社交三角色共用 SocialServer 类，连接表进程内独立）
   - `maps` → `bin/start-maps.php`（Workerman 原生多频道单入口，一个 master 管全部地图/副本频道进程）
-- 可用 `--parts=social|maps` 只起其中一个单元（缺省 `all` 全起）。
+- 可用 `--parts=social|maps|storage` 只起其中一个单元（缺省 `all` 全起）。
 - 启动前会先探测 Redis（按 `deploy.yaml` 的 redis 段 ping），不可用则中止。
-- 前台运行，日志按服务落盘：`/tmp/nythros-server/{social-gateway,social-chat,social-team,maps}.log`；运行清单在 `/tmp/nythros-server/run.json`。
+- 前台运行，日志按服务落盘：`/tmp/nythros-server/{social-gateway,social-chat,social-team,maps,exporter-1}.log`；运行清单在 `/tmp/nythros-server/run.json`。
 - 停止：前台按 `Ctrl+C`（信号转发优雅停止），或在另一个终端执行：
 
 ```bash
@@ -138,7 +138,7 @@ php vendor/bin/make make:actor PlayerActor2 --kind=player --ns=Nythros\Demo\Game
 
 - `--kind=player|monster|npc`：分别继承 `BasePlayer`（钩子 `onTick/onDamaged/onDeath`）、`BaseMonster`（钩子 `onPatrol/onChase/onAttack/onDead/onDeath`）、`BaseNPC`（钩子 `onIdle/onInteract`）。
 - `--out` 目录不存在时会自动创建。
-- 另有 `make:skill` / `make:event` / `make:map` 三类脚手架，用法见 `php vendor/bin/make` 输出。
+- 另有 `make:skill` / `make:event` / `make:map` 三类脚手架与 `make:capabilities` 能力报告（全部能力块×当前开关判定），用法见 `php vendor/bin/make` 输出。
 - 生成的骨架带 TODO 注释，参照 `packages/framework/src/Actor/PlayerActor.php` 与 `packages/framework/src/Combat/MonsterActor.php` 实现钩子即可（详见《Actor 指南》）。
 
 ## 6. 步骤 ⑤：客户端连接验证
@@ -148,7 +148,7 @@ php vendor/bin/make make:actor PlayerActor2 --kind=player --ns=Nythros\Demo\Game
 | 脚本 | 覆盖 | 账号 | 能否直接跑 |
 |---|---|---|---|
 | `packages/demo/bin/verify-phase5.php` | 社交层端到端：登录、进图凭证、战斗直连铁律、聊天、组队、掉线重连、滚动更新、token 单向 | `1001/1002/1003`（密码 `secret`，与 `run-worker.php` 缺省账号装配一致） | **能**，直接跑 |
-| `packages/demo/bin/verify-combat.php` | 战斗层端到端：怪物生成、攻击、死亡、掉落、拾取、技能、失败回执、持久化（共 9 项） | `1001~1010` | **不能**，需临时副本（见下文） |
+| `packages/demo/bin/verify-combat.php` | 战斗层端到端：怪物生成、攻击、死亡、掉落、拾取、技能、失败回执、持久化（共 9 项） | `1001~1010` | 能（需账号注入 + 每轮重启，见下文） |
 
 ### 6.1 推荐：跑社交层验收（与正式启动一致）
 
@@ -158,15 +158,18 @@ php packages/demo/bin/verify-phase5.php
 
 输出契约：每项一行 `[verify] [PASS|FAIL|SKIP]`，末行 `RESULT` 汇总。PASS 即整条链路（登录 → 进图 → 战斗直连）验证通过。
 
-### 6.2 战斗层验收：verify-combat（需临时副本）
+### 6.2 战斗层验收：verify-combat（可直跑，两条前置）
 
-`verify-combat.php` 是阶段 5 战斗层端到端验收脚本，其前置要求与正式 monorepo 启动**不一致**，直接跑会因账号缺失等原因 FAIL/SKIP：
+`verify-combat.php` 直跑 `php bin/server start` 起的正式栈（chat/team 对外地址经 deploy.yaml 注入、auth_ok.endpoints 下发），但脚本头部声明两条前置，缺一条会 FAIL：
 
-- 账号表需 `1001~1010`（正式装配缺省只含 `1001/1002/1003`，可用 `NYTHROS_ACCOUNTS` 环境变量扩展）；
-- Map 怪物需延迟 spawn（正式 `run-worker.php` 是启动即生成 `monster-1/monster-2`）；
-- 归档存储需 Redis 可观察实现（正式为 `InMemoryStorage`）。
+- **账号表扩展**：正式装配缺省只含 `1001/1002/1003`，验收需 1001~1010——启动服务前用
+  `NYTHROS_ACCOUNTS=1001=secret,1002=secret,...,1010=secret php bin/server start` 注入；
+- **每轮重启 Map**：初始怪物只在 onWorkerStart 出生一次，本验收会击杀全部怪物，
+  同实例二次运行会因无怪而大面积 FAIL（预期行为，非缺陷）。
 
-该脚本头部注释记录了临时副本的路径与改造点（`/tmp/opencode/combat/run-worker.php` 等）。普通用户验证连接请用 6.1 的 `verify-phase5.php`。
+持久化门禁（验收项 8）从 MySQL `nythros_archive` 侧读断言背包——export 缺省模式下该写入由
+storage-exporter 完成（落库链路见 persistence-guide §2.1），mysql 回退模式为 worker 批量直写。
+只想验证连接链路（不测战斗）直接跑 6.1 的 `verify-phase5.php`（缺省账号即可）。
 
 ### 6.3 最简冒烟：echo 客户端
 
@@ -194,8 +197,8 @@ php packages/demo/bin/ws-client.php   # 期望输出 [client] received: echo: he
 4. 死亡      多玩家集火 → 视野广播 entity_dead（怪物 Actor 自清理，尸体攻击得 combat:error invalid_target）
 5. 掉落      怪物死亡 → drop:spawned（视野）+ 掉落物 entity_enter 附 itemId
 6. 拾取      pickup{dropId} → 定向 item:added（拾取者）+ 视野 drop:removed
-7. 落库      拾取后背包经 ArchivePipeline.markDirty → 归档存储（正式 monorepo 为 InMemoryStorage，
-              验收/生产可替换为可观察存储实现）
+7. 落库      拾取后背包经管线 markDirty → 冲刷点写 Redis 权威 + 导出 Stream → storage-exporter 落
+              MySQL 归档（export 缺省模式；mysql 回退模式为 worker 批量直写，见 persistence-guide）
 ```
 
 ## 8. 本文与入门套件、demo 的关系
@@ -214,4 +217,4 @@ php packages/demo/bin/ws-client.php   # 期望输出 [client] received: echo: he
 | `[server] 已有运行实例` | 运行清单存在且服务存活；先 `php bin/server stop` 再 start |
 | WSL2 下端口被占用 | 直接编辑 `deploy.yaml` 换端口（见 3.2 节） |
 | `make:actor` 报参数错误 | 按 `php vendor/bin/make` 的 USAGE 检查 `--kind/--ns/--out` 三者齐全 |
-| verify-combat 出现大量 FAIL | 该脚本需要临时副本（账号 1001~1010、延迟 spawn、Redis 归档），请改跑 `verify-phase5.php` |
+| verify-combat 出现大量 FAIL | 两条前置未满足：`NYTHROS_ACCOUNTS` 未注入 1001~1010，或本轮未重启 Map（怪物已被上轮击杀）；纯连接验证请改跑 `verify-phase5.php` |

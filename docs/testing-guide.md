@@ -1,8 +1,8 @@
 # 测试指南（Testing Guide）
 
 > 面向读者：为 Nythros 及其上玩法编写测试的程序。读完你能：选对测试层（单测/集成/E2E/基准）、
-> 仿照仓库既有形状写出新用例、接上 CI 门禁。测试现状：124 个 PHPUnit 测试类
-> （engine 43 / framework 65 / demo 16）+ verify-* E2E 脚本族 + benchmark 回归门禁。
+> 仿照仓库既有形状写出新用例、接上 CI 门禁。测试现状：130 个 PHPUnit 测试类
+> （engine 43 / framework 71 / demo 16）+ verify-* E2E 脚本族 + benchmark 回归门禁。
 
 ## 1. 四层测试模型
 
@@ -50,7 +50,7 @@ packages/<pkg>/tests/<Module>/<ClassName>Test.php   # 与 src 的 Module 目录�
 | 脚本 | 覆盖 |
 |---|---|
 | `verify-phase5.php` | 社交层端到端：登录、进图凭证、战斗直连铁律、聊天、组队、掉线重连（可直接跑） |
-| `verify-combat.php` | 战斗端到端：生成/攻击/死亡/掉落/拾取/技能/持久化（需临时副本，见 quick-start §6.2） |
+| `verify-combat.php` | 战斗端到端：生成/攻击/死亡/掉落/拾取/技能/持久化（可直跑正式栈，需 `NYTHROS_ACCOUNTS` 注入 1001~1010 + 每轮重启 Map，见 quick-start §6.2） |
 | `verify-economy.php` / `verify-matching.php` / `verify-room.php` | 经济 / 匹配 / 房间 |
 | `verify-transfer.php` / `verify-scale.php` | 跨 map 迁移 / 容量准入与扩缩容 |
 | `verify-mmorpg.php` | MMORPG 模式综合（任务链/领奖落库复核在 export 模式下经 Stream→storage-exporter 链路） |
@@ -87,9 +87,12 @@ php tools/bench-gate.php --self-test
 | `composer cs` | 代码风格（@PSR12 + strict_types） |
 | `composer stan` | phpstan level 8（四包 src 全量，含 skeleton） |
 | `composer internal` | @internal 公开符号门禁（ADR-023/024，双向：engine 标注 + framework use 扫描） |
+| `composer io-free` | 热路径 IO 剥离门禁：tick/战斗/移动文件出现 `\Redis`/`\PDO` 客户端引用即 FAIL（含 `--self-test`） |
 | `composer api` | docs/api-reference.md 与代码一致性 |
 
-四项全部在 CI 强制。新公开类必须过 `internal`（该标 @internal 的标）并再生成 API 一览。
+五项全部在 CI 强制。新公开类必须过 `internal`（该标 @internal 的标）并再生成 API 一览；
+新能力块若引入持久化需求，走 `PersistPipelineInterface` 管线/写回缓冲模式而非往热路径添同步 IO
+（best-practices §1 纪律，persistence-guide §2.1 双模式）。
 
 ## 8. 新玩法的测试策略（建议路径）
 

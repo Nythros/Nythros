@@ -42,11 +42,12 @@ composer create-project ...
 | 13 | `13-阶段5-决策确认与偏差复盘.md` | 阶段 5 决策全景回顾与四级偏差核查：架构转向（纯自研 → gateway-worker 混合）致 RPC 层删除、region 聊天反方向、Lua 并发正确性靠测试锁定、蓝图阶段 5 目标偏离、未来愿景对照 |
 | 14 | `14-framework与Demo验收总结.md` | 阶段 5（framework 层 + 完整 Demo）验收复盘：framework 包（四基类 + Damageable + Container/Config/EventDispatcher + Skill/Item/Buff 插件机制）+ CLI（make:* + bin/server）+ 完整 Demo 战斗闭环（CombatService/MonsterActor/DropEntity/DropTable/Inventory/EntityTypeIndex + MapServer 战斗路由 + PlayerActor 改造 + 持久化接线）；verify-combat PASS=9 FAIL=0 SKIP=0、铁律 1 零 @internal import、phpunit 413 / phpstan 0 / cs-fixer 0；reviewer PASS（6 MINOR：3 修复 + 3 记录债务）；遗留项（spawnDrops 未登记 typeIndex、run-worker 未走 PluginRegistry、怪物 PATROL 同格位移不广播） |
 
-> 15~31 号文档为 mmorpg 试点（P1~P19）的阶段验收记录，按编号递增阅读即可；目录内另有：
+> 15~34 号文档为 mmorpg 试点（P1~P19）与运行期治理（33 长跑与故障演练、34 玩法矩阵扩展）的阶段验收记录，
+> 按编号递增阅读即可；目录内另有：
 
 | 文档 | 内容 |
 |---|---|
-| [`adr/`](adr/README.md) | ADR-001~026 全量架构决策记录（单一权威源） |
+| [`adr/`](adr/README.md) | ADR-001~029 全量架构决策记录（单一权威源） |
 | [`32-架构分层审计报告.md`](32-架构分层审计报告.md) | 三包分层审计：「机制 vs 玩法」判别、上提候选、分层口诀 |
 
 ## 技术路线

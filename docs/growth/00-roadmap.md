@@ -32,7 +32,7 @@
 |---|---|---|---|---|
 | [01 认证](01-token-auth.md) | uid 直通 → 签发/消费多 scope token | `TokenManager`、`InMemoryTokenStore`/`RedisTokenStore`、`TokenStatus` | 单进程可 InMemory，跨进程需 Redis | `StaticAuthenticator` + `handleAuthMessage` |
 | [02 战斗](02-combat.md) | attack/skill/掉落，视野广播 combat:hit | `CombatService`、`MonsterActor`、`Damageable`、`make:actor --kind=monster` | 否（进程内） | `MapServer` 战斗路由 |
-| [03 背包与持久化](03-inventory-persistence.md) | 拾取进背包 → 归档落库 | `Inventory`、`StorageInterface`、`ArchivePipeline` | 否（`InMemoryStorage` 起步，MySQL 另配） | `ArchivePipeline` + `MySqlStorage` |
+| [03 背包与持久化](03-inventory-persistence.md) | 拾取进背包 → 归档落库 | `Inventory`、`StorageInterface`、`PersistPipelineInterface`（`ArchivePipeline`/`RedisExportPipeline` 双实现） | 否（`InMemoryStorage` 起步；demo 缺省 export 模式=Redis 权威+Stream+exporter，见该章 §5） | 管线 + `MySqlStorage`（export 经 `run-exporter.php`） |
 | [04 聊天](04-chat.md) | 五 scope 世界/频道/队伍/帮派/私聊 | `SocialService`、`ConnectionHubInterface` | 单进程可，跨角色需 Redis 多 scope token | `SocialServer` + `WorkermanHubTransport` |
 | [05 组队与帮派](05-team-guild.md) | invite→accept 状态机、帮派 CRUD | `TeamStoreInterface`、`GuildStoreInterface` | 跨进程共享需 Redis 实现 | `SocialServer::handleTeam/handleGuild` |
 | [06 匹配与房间](06-matching-rooms.md) | 撮合进房、每房间独立战斗容器 | `MatchingService`、`MatchJoinHandlerInterface`、`RoomInstanceInterface` | 否 | `RoomHub` + `MatchJoinOrchestrator` |

@@ -71,8 +71,9 @@ use Nythros\Framework\Plugin\PluginRegistry;
 
 $container = new Container();
 $registry = new PluginRegistry();
-$registry->load(new AnnouncerPlugin(), $container, $events); // 只做 register（重复 load 同名插件直接抛异常）
-$registry->enable('announcer');                               // ★ 启用是显式第二步（register ≠ enable）
+if ($registry->load(new AnnouncerPlugin(), $container, $events)) { // 只做 register（重复 load 同名插件抛异常）
+    $registry->enable('announcer');                          // ★ 启用是显式第二步（register ≠ enable）
+}                                                            // load 返回 false = 能力开关关闭（plugin-guide §2.3），禁再 enable
 // 热关闭：$registry->disable('announcer')；卸载：$registry->uninstall('announcer', $container, $events)
 ```
 

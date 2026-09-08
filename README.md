@@ -3,14 +3,15 @@
 Nythros 是一套 **PHP 游戏服务器引擎框架**：Actor 模型 + AOI 视野管理 + 多进程拓扑 + 服务端权威状态同步，
 基于 Workerman 5 与 PHP 8.3，用于搭建房间制与 MMORPG 大地图类多人在线游戏。
 
-> 运行环境：Linux / WSL2（依赖 `pcntl`/`posix` 扩展），PHP ≥ 8.3 + `ext-redis`，Redis 6+（MySQL 可选）。
+> 运行环境：Linux / WSL2（依赖 `pcntl`/`posix` 扩展），PHP ≥ 8.3 + `ext-redis`，Redis 6+；
+> MySQL 仅持久化需要（export 缺省模式下 storage-exporter 与 mysql 回退模式的 worker 落盘；纯验收/内存档可省）。
 
 ## 包结构（monorepo）
 
 | 包 | 说明 | 依赖 |
 |---|---|---|
 | [`packages/engine`](packages/engine) | **nythros/engine** 引擎核心：Contracts 契约接口（v0.1 冻结）+ 15 个核心模块实现（World/Entity/Actor/AOI/Event/Network/Protocol/Security/Persistence/Cluster/Scheduler 等） | workerman ^5.2 |
-| [`packages/framework`](packages/framework) | **nythros/framework** 开箱即用层：三基类（BasePlayer/BaseMonster/BaseNPC，继承 engine 的 `Actor\BaseActor`）+ Combat/Inventory/Social/Mail/Quest/Auction/Matching/Leaderboard/GM/插件机制 + `make` 脚手架 CLI | nythros/engine |
+| [`packages/framework`](packages/framework) | **nythros/framework** 开箱即用层：三基类（BasePlayer/BaseMonster/BaseNPC，继承 engine 的 `Actor\BaseActor`）+ Combat/Inventory/Social/Mail/Quest/Auction/Matching/Leaderboard/GM/插件机制 + `make` 脚手架 CLI 与 `make:capabilities` 能力报告（CapabilityCatalog）+ 持久化管线双模式（PersistPipelineInterface） | nythros/engine |
 | [`packages/demo`](packages/demo) | **nythros/demo** 参考实现：deploy.yaml 拓扑、MapServer/SocialServer 装配、storage-exporter 导出进程、玩法数据三表、verify-* 端到端验收脚本 | engine + framework |
 | [`packages/client-js`](packages/client-js) | **@nythros/client** 官方 JS SDK：二进制协议编解码、登录链路、事件订阅/回执、插值引擎、断线重连（零依赖，Node ≥22 / 浏览器通用） | — |
 | [`packages/skeleton`](packages/skeleton) | **nythros/skeleton** create-project 入门套件：最小可运行游戏骨架（GridAOI 主城 + 全量广播副本）；由 `v*` tag subsplit 发布为 [Nythros/skeleton](https://github.com/Nythros/skeleton) 独立仓（ADR-019 镜像） | engine + framework |
@@ -90,7 +91,7 @@ composer cs        # php-cs-fixer
 composer stan      # phpstan
 composer internal  # @internal 公开符号门禁（ADR-023/024）
 composer io-free   # 热路径 IO 剥离门禁（tick/战斗/移动文件不得引用 \Redis/PDO 客户端，见 best-practices §1）
-composer test      # phpunit（127 个测试类：engine 43 / framework 68 / demo 16；集成测试需 Redis/MySQL）
+composer test      # phpunit（130 个测试类：engine 43 / framework 71 / demo 16；集成测试需 Redis/MySQL）
 php tools/generate-api-docs.php   # 校验并再生成 docs/api-reference.md
 ```
 

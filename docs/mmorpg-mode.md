@@ -44,7 +44,7 @@ redis:                # host/port —— token/注册表/票据共享层
   host: 127.0.0.1
   port: 6379
 
-mysql:                # host/port/user/password/dbname —— 归档（ArchivePipeline::MySqlStorage）
+mysql:                # host/port/user/password/dbname —— 冷归档落盘（export 模式经 storage-exporter；mysql 回退模式 worker 直写）
   host: 127.0.0.1
   port: 3306
   user: root
@@ -79,20 +79,24 @@ processes:            # 必填段：process 名 => 服务列表
       channelId: pool-1
       worldType: full     # aoi（缺省）| full
       port: 18084
+  storage:                # 导出单元：消费 nythros:export:players Stream 落 MySQL（export 模式专用）
+    - type: storage
+      port: 18300         # 仅占位（pidFile/观测键），不监听
 ```
 
 service 键白名单：`type/port/count/mapId/channelId/worldType/pidFile`（`DeployConfig::SERVICE_KEYS`）。
 约束（违反即启动期 `InvalidArgumentException` 带行号报错）：
 
-- `type` ∈ `gateway|chat|team|map`；`port` 1~65535 且**全局唯一**；
+- `type` ∈ `gateway|chat|team|map|storage`；`port` 1~65535 且**全局唯一**（storage 的 port 仅占位不监听）；
 - map 服务必须声明非空 `mapId + channelId`，serviceId 全局唯一；
 - `count`（整数 ≥1，缺省 1）把同一声明展开成多个 worker 进程；
 - `pidFile` 可选（Workerman 单实例锁键），缺省按 type+port 生成 `/tmp/nythros-{type}-{port}.pid`。
 
 ### 2.2 启动铁序与命令
 
-启动铁序（`bin/server` 头注释）：**Redis（外部，先 ping 检查）→ social → map**——社交组先起，
-Map 进程 register 进注册表后社交层才 discover 得到。`bin/server stop` 逆序优雅停（Map → Social）。
+启动铁序（`bin/server` 头注释）：**Redis（外部，先 ping 检查）→ social → map → storage**——社交组先起，
+Map 进程 register 进注册表后社交层才 discover 得到；storage-exporter 只依赖 Redis/MySQL 故殿后。
+`bin/server stop` 逆序优雅停（exporter → Map → Social）。
 
 统一编排入口是仓库根的 `bin/server`（声明组；`packages/demo/bin/launch.php` 是 maps-only 便捷入口）：
 
@@ -100,18 +104,19 @@ Map 进程 register 进注册表后社交层才 discover 得到。`bin/server st
 # 全量启动（social + maps）
 NYTHROS_MMORPG=1 setsid -f php bin/server start
 
-# 只起社交组 / 只起地图与副本组
+# 只起社交组 / 只起地图与副本组 / 只起导出组
 php bin/server start --parts=social
 php bin/server start --parts=maps
+php bin/server start --parts=storage
 
 # 查看运行清单 / 停止
 php bin/server status
 php bin/server stop
 ```
 
-`--parts` 取值 `all|social|maps`（`bin/server` 的 `parseCli` 校验）。maps 组内部由根 `bin/start-maps.php`
+`--parts` 取值 `all|social|maps|storage`（`bin/server` 的 `parseCli` 校验）。maps 组内部由根 `bin/start-maps.php`
 以 Workerman 原生多频道形态托管（一个 master 管全部频道进程，自带监督/自动重启）；social 组逐角色
-spawn `packages/demo/bin/run-worker.php --service=<type>`。
+spawn `packages/demo/bin/run-worker.php --service=<type>`；storage 组 spawn `packages/demo/bin/run-exporter.php`。
 
 单实例直启（动态扩容、调试都用它，registry 自动注册）：
 
@@ -141,7 +146,10 @@ php packages/demo/bin/run-worker.php --service=map --mapId=map-1 --channelId=ch-
 | `NYTHROS_PVP=1` / `NYTHROS_KILL_CREDIT='damage_leader'` | PVP 开关（缺省关）/ 击杀归属（last_hit 缺省） |
 | `NYTHROS_DEATH_DROP=1`（+`_RATIO/_WINDOW_SECONDS/_MAX/_BOUND`） | 玩家死亡掉落策略 |
 | `NYTHROS_MMORPG_CHAINS='id=q1,q2;id2=q3'` | 任务链（分号分隔链，等号后逗号分隔任务顺序） |
-| `NYTHROS_ARCHIVE_RESTORE=1` | 票据缺席时归档兜底恢复背包 |
+| `NYTHROS_PERSIST_MODE=export\|mysql` | 持久化管线双模式（缺省 export：背包 Redis 权威 + Stream + storage-exporter 落 MySQL；`mysql` 回退 worker 直写，见 persistence-guide §2.1） |
+| `NYTHROS_ARCHIVE_RESTORE` | 票据缺席时背包恢复读：**export 模式缺省开**（`=0` 关，读 Redis `nythros:bag:*`）；**mysql 回退模式缺省关**（`=1` 开，读 MySQL 归档）——语义按模式不同，见 persistence-guide §4 |
+| `NYTHROS_BCRYPT_COST` | 登录 bcrypt cost（缺省 9；每 -1 登录吞吐翻倍，见 security.md §2 三级旋钮） |
+| `NYTHROS_FEATURES` / `NYTHROS_FEATURE_<NAME>` | 能力白名单 / 单能力覆盖（能力开关第二闸，见 plugin-guide §2.3；报告 `make:capabilities`） |
 | `NYTHROS_RANDOM_SEED=<数字>` | 种子随机源（E2E 复现确定性） |
 
 地图内容（出生点/初始怪物表）在 `packages/demo/config/gameplay.php`（gameplay 表）：
@@ -211,9 +219,10 @@ gateway(JSON)                     map-1 进程                        map-2 进�
   天然防重放。
 - **快照形状**：`{fromMapId: string, position: {x,y}, hp: int(≥1), inventory: {itemId: count}}`。
 - **故障方向**：消费失败/TTL 过期/坏 JSON 一律回落「全新入场」——变保守不变错。
-- 票据之外的状态不迁移：房间归属/匹配队列走既有 Redis 持久化重进，任务进度本就在 RedisQuestStore，
-  装备挂载重登重建；`NYTHROS_ARCHIVE_RESTORE=1` 时票据缺席再兜底读 MySQL 归档
-  （`MapServer::restoreInventoryFromArchive`）。
+- 票据之外的状态不迁移：房间归属/匹配队列走既有 Redis 持久化重进，任务进度本就在 RedisQuestStore
+  （写回缓冲，见 persistence-guide），装备挂载重登重建；票据缺席再走管线恢复读——
+  export 缺省读 Redis 背包权威（`nythros:bag:*`），mysql 回退读 MySQL 归档（需开 `NYTHROS_ARCHIVE_RESTORE=1`；
+  `MapServer::restoreInventoryFromArchive` 对两种管线同形，接口即 `PersistPipelineInterface::load`）。
 
 E2E 参考：`packages/demo/bin/verify-transfer.php`（登录 → 承伤致死 → `map:enter` 换图 →
 「迁移后首击 hp≤1」的区间分离断言验证 hp=1 经票据恢复）。
@@ -478,13 +487,14 @@ php benchmarks/stress-rooms.php --rooms=15 --seconds=25
    自造 `transfer:*` 之类的帧是在倒退回被否决的 ADR-025 备选方案。
 3. **同图重入不做频道偏好管理就期待扩容实例接客**——会话频道优先级高于最少在线；
    扩容后必须 drain（或 stopping）旧频道，新实例才有流量（verify-scale 实测踩坑）。
-4. **把转移票据当持久存储**——TTL 30s、原子单消费、同图才恢复坐标。长线离线恢复走
-   `NYTHROS_ARCHIVE_RESTORE=1` 的归档兜底，不是票据。
+4. **把转移票据当持久存储**——TTL 30s、原子单消费、同图才恢复坐标。长线离线恢复走管线恢复读
+   （export 缺省读 Redis 背包权威 / mysql 回退开 `NYTHROS_ARCHIVE_RESTORE=1` 读归档），不是票据。
 5. **改 AOI 格子尺寸只改一处**——`GridAOI(10)`（MapChannelFactory）与 `MapServer::AOI_CELL_SIZE`
    （热区密度统计）必须同步；不同源会让热区分频按错误密度采样。
-6. **在帧路径里做同步 I/O**——持久化一律走 `ArchivePipeline` 的 markDirty（零 I/O）→
-   断连/登出 `flushId` 强制同步点 → 30s 兜底批量 `saveBatch`（`FLUSH_INTERVAL_SECONDS`）。
-   直接在 move/attack 路由里写 MySQL/Redis 会击穿 6ms 预算。
+6. **在帧路径里做同步 I/O**——持久化一律走 `PersistPipelineInterface` 管线的 markDirty（零 I/O）→
+   断连/登出 `scheduleFlushId`（0.2s 合并窗批量）→ 30s 兜底（`bindTimer` 挂载）；export 模式下
+   worker 连 MySQL 句柄都没有。直接在 move/attack 路由里写 MySQL/Redis 会击穿 6ms 预算
+   （`composer io-free` 静态门禁拦截）。
 7. **把玩法参数硬编码进 framework**——framework 只放参数与规则（MmorpgConfig/ThreatRules 等），
    env 解析与装配留组装层（唯一组装点铁律，demo 即 `MapChannelFactory`）；数值进 gameplay/skills/drops 表享受热载。
 8. **一个 World 服务多张图 / 一个频道多 World**——大地图水平扩展的单位是频道
@@ -511,6 +521,6 @@ php benchmarks/stress-rooms.php --rooms=15 --seconds=25
 | 扩缩容 | `packages/framework/src/Gm/Command/DrainCommand.php`、`packages/framework/src/Gm/GmDrainHandlerInterface.php`、`packages/demo/bin/verify-scale.php`、`packages/demo/bin/map-rolling.php` |
 | AOI | `packages/engine/src/Aoi/GridAOI.php`、`packages/engine/src/Aoi/UniversalAOI.php`、`docs/cell-guide.md` |
 | 玩法插件 | `packages/framework/src/Game/Mmorpg/*`、`packages/framework/src/Game/Horde/*`、`packages/demo/config/gameplay.php` |
-| 持久化/观测 | `packages/framework/src/Persistence/ArchivePipeline.php`、`packages/framework/src/Observability/PerfSampler.php`、`packages/demo/bin/perf-stats.php`、`benchmarks/stress-map.php`、`benchmarks/stress-hotzone.php`、`benchmarks/stress-rooms.php` |
+| 持久化/观测 | `packages/framework/src/Persistence/`（`PersistPipelineInterface`/`ArchivePipeline`/`RedisExportPipeline`/`SessionParticipantInterface`）、`packages/framework/src/Inventory/RedisInventoryStore.php`、`packages/demo/bin/run-exporter.php`、`packages/framework/src/Observability/PerfSampler.php`、`packages/demo/bin/perf-stats.php`、`benchmarks/stress-map.php`、`benchmarks/stress-hotzone.php`、`benchmarks/stress-rooms.php` |
 | 客户端 | `packages/client-js/nythros-client.js`、`packages/client-js/examples/reconnect-demo.js`、`packages/client-js/examples/mmorpg-canvas.html` |
 | E2E 验收 | `packages/demo/bin/verify-transfer.php`、`packages/demo/bin/verify-scale.php`、`packages/demo/bin/verify-mmorpg.php` |

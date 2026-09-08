@@ -30,7 +30,7 @@ Engine（契约 + 核心实现）
 - 战斗契约 `Damageable`：玩家与怪物共同实现的最小战斗面（hp / maxHp / takeDamage / heal / isDead），使战斗服务以统一签名承载双向攻击。
 - 业务模块（ADR-020 §3.1 上移）：`Combat`（CombatService/MonsterActor/掉落）、`Inventory`、`Social`（SocialService/ConnectionHub/TeamStore/GuildStore/LocationStore）、`Actor`（PlayerActor）、`Auth`（Identity）。
 - 插件机制 `Nythros\Framework\Plugin`：官方插件（Skill / Item / Buff）经 `PluginRegistry::load` 走 register → enable 生命周期，数据定义经 Container 注入。
-- 脚手架 `make` CLI：`make:actor` / `make:skill` / `make:event` / `make:map`（入口 `vendor/bin/make`）。
+- 脚手架 `make` CLI：`make:actor` / `make:skill` / `make:event` / `make:map` + 能力报告 `make:capabilities`（`CapabilityCatalog` 数据源，入口 `vendor/bin/make`）。
 
 ### 1.3 组装层：skeleton（入门套件）与 demo（参考实现）
 
@@ -66,8 +66,12 @@ flowchart LR
     C1 --> GW & CH & TM
     C2 --> M1 & M2 & M3 & M4
     GW -- "auth_ok 下发三地址" --> C1
-    GW & CH & TM & M1 & M2 & M3 & M4 <-- "token / 注册发现 / 快照(TTL) / PerfSampler" --> Redis[("Redis :6379")]
-    MapUnit -- "ArchivePipeline 落库" --> DB[("MySQL :3306")]
+    GW & CH & TM & M1 & M2 & M3 & M4 <-- "token / 注册发现 / 快照(TTL) / 背包权威(bag:*) / 导出 Stream / PerfSampler" --> Redis[("Redis :6379")]
+    subgraph StorageUnit["Storage 单元（导出进程，type: storage）"]
+        EX["storage-exporter<br/>消费组单消费者"]
+    end
+    Redis -- "XREADGROUP nythros:export:players" --> EX
+    EX -- "落盘 upsert" --> DB[("MySQL :3306")]
 ```
 
 ### 2.0.1 分层结构图
@@ -130,8 +134,8 @@ flowchart TD
 
 ### 2.4 启动顺序与部署
 
-- 启动铁序（ADR-021 §3.3）：**Redis（外部）→ social 单元 → map 单元**。`php bin/server start` 一条命令完成（`--parts=social|maps` 可单独部署一个单元）。
-- 部署单元：`deploy.yaml` 中每个 `process` 块 = 一个部署单元；`social` 块声明 gateway/chat/team 三角色，每个 `map` 服务声明 `mapId + channelId`（serviceId 编码 `{mapId}#{channelId}`，一频道一进程一 World），`count` 字段可展开多个 worker。
+- 启动铁序（ADR-021 §3.3）：**Redis（外部）→ social 单元 → map 单元 → storage 单元**。`php bin/server start` 一条命令完成（`--parts=social|maps|storage` 可单独部署一个单元）。
+- 部署单元：`deploy.yaml` 中每个 `process` 块 = 一个部署单元；`social` 块声明 gateway/chat/team 三角色，每个 `map` 服务声明 `mapId + channelId`（serviceId 编码 `{mapId}#{channelId}`，一频道一进程一 World），`storage` 块声明导出进程（port 仅占位），`count` 字段可展开多个 worker。
 - Map 有状态不能 reload，采用「滚动更新」：新实例 serving → 旧实例在 Redis 标记 stopping → 社交层 discover 过滤不再分配新玩家 → 旧实例自然退出。
 
 ## 3. 依赖方向铁律
@@ -189,7 +193,7 @@ sequenceDiagram
         M-->>C: combat:hit / entity_dead / drop:spawned（视野广播）
         C->>M: pickup{dropId}
         M-->>C: item:added（定向）+ drop:removed（视野）
-        M->>M: ArchivePipeline.markDirty → 归档落库
+        M->>M: 管线 markDirty → 冲刷点 Redis 权威 + 导出 Stream → exporter 落 MySQL
     end
 ```
 
@@ -204,7 +208,7 @@ sequenceDiagram
 
 1. 客户端发 `attack{targetId}` → MapServer 前置校验（目标有效/存活/非自身/九宫格距离/冷却）→ `combat->attack` 结算。
 2. 视野广播 `combat:hit`；怪物死亡 → `entity_dead` + 掉落 `drop:spawned`。
-3. 拾取 `pickup{dropId}` → 定向 `item:added` + 视野 `drop:removed` → `ArchivePipeline.markDirty` 落库。
+3. 拾取 `pickup{dropId}` → 定向 `item:added` + 视野 `drop:removed` → 管线 `markDirty`（export 缺省：冲刷点 Redis 权威 + Stream 导出；mysql 回退：worker 直写归档）。
 
 ### 5.3 每帧 Tick 顺序（蓝图 §9）
 
