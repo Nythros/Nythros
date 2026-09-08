@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nythros\NetworkWorkerman;
 
 use Nythros\Contracts\TimerInterface;
+use Nythros\Kernel\PerfProbe;
 use Nythros\KernelWorkerman\WorkermanTimer;
 use Nythros\Network\RateLimiterInterface;
 use Nythros\Network\ServerInterface;
@@ -329,6 +330,15 @@ final class WorkermanWebSocketServer implements ServerInterface
             return;
         }
 
+        // 运行期计量（热路径归因）：派发链耗时直方图（finally 口径=异常路径同样入桶,错误帧回写耗时也在内）
+        // + 入站消息计数。用途:「哪类消息吃了帧预算」的排障入口——审计 P0-A 类回归(bcrypt/同步 IO 混进
+        // handler)在此指标上直接现形。键前缀 network.* 进 PerfSampler 键族与 Prometheus histogram 导出。
+        // Runtime instrumentation (the hot-path attribution): the dispatch-chain duration histogram (finally-based,
+        // so exception paths land in the bucket too and the error-frame write-back is included) plus the inbound
+        // message counter — the troubleshooting entry for "which message ate the frame budget" (audit P0-A-class
+        // regressions such as bcrypt/sync IO inside a handler show up here directly). The network.* keys ride the
+        // PerfSampler family and the Prometheus histogram export.
+        $dispatchStartedAt = microtime(true);
         try {
             foreach ($this->onMessageHandlers as $handler) {
                 $handler($conn, $data);
@@ -348,6 +358,9 @@ final class WorkermanWebSocketServer implements ServerInterface
                     'message' => $e->getMessage(),
                 ]),
             ]));
+        } finally {
+            PerfProbe::recordDuration('network.dispatch_ms', (microtime(true) - $dispatchStartedAt) * 1000);
+            PerfProbe::increment('network.inbound_messages');
         }
     }
 

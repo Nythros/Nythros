@@ -15,11 +15,18 @@ use Nythros\Kernel\PerfProbe;
  *    队列已满时，可丢弃信封被丢弃并计数（getDroppedCount）；可靠信封（droppable=false）追加到队尾（允许临时超出上限）——
  *    既不丢失、也保持彼此入队顺序，且不会越过更早的可丢信封被提前派发（修复可靠事件插队导致的同帧乱序）；
  *    队列每帧 flush 清空，超出部分有界于单帧可靠事件数。
+ * 监听器故障隔离（与网络层 handleMessage 的「一个 handler 崩溃不拖垮消息循环」同纪律）：publish/flush 逐监听器
+ * try/catch——一个监听器抛异常只记日志+计数（eventbus.listener_error_total），不吞掉同事件其余监听器的送达、
+ * 不打断 flush 循环（此前异常沿调用栈上抛：flush 在帧末执行,一个坏监听器会吃掉本帧剩余信封与后续帧管线）。
  * Simple event bus with two publishing paths:
  * 1) publish: synchronously dispatches an array payload by event name to subscribed listeners in subscription order, bypassing the queue;
  * 2) publishEnvelope: envelopes enter a bounded queue (maxQueueSize) and are dispatched by type in enqueue order on flush, with listeners
  *    receiving the EventEnvelope object; when the queue is full, droppable envelopes are dropped and counted (getDroppedCount) while
  *    reliable ones (droppable=false) are dispatched synchronously right away so they are never lost.
+ * Listener isolation (the networking layer's "one crashing handler must not take down the loop" discipline): publish/flush
+ * wrap each listener in try/catch — a throwing listener is logged and counted (eventbus.listener_error_total) but never
+ * swallows the remaining listeners of the same event nor aborts the flush loop (previously the exception propagated: flush
+ * runs at frame end, so a single bad listener ate the rest of the frame's envelopes and the pipeline behind it).
  * @internal 引擎内部实现，非公开 API。Engine-internal implementation, not part of the public API.
  */
 final class SimpleEventBus implements EventBusInterface
@@ -71,7 +78,7 @@ final class SimpleEventBus implements EventBusInterface
     {
         // ?? [] 兜底未订阅的事件，保证 publish 是静默空操作而非报错 ?? [] covers events with no subscribers, keeping publish a silent no-op instead of an error
         foreach ($this->listeners[$event] ?? [] as $listener) {
-            $listener($payload);
+            $this->invoke($listener, $payload, $event);
         }
     }
 
@@ -156,8 +163,32 @@ final class SimpleEventBus implements EventBusInterface
 
         foreach ($pending as $envelope) {
             foreach ($this->listeners[$envelope->type] ?? [] as $listener) {
-                $listener($envelope);
+                $this->invoke($listener, $envelope, $envelope->type);
             }
+        }
+    }
+
+    /**
+     * 监听器隔离调用：异常只记日志+计数（事件名与负载摘要进日志归因），不外抛——
+     * 语义 = 「事件的送达是逐监听器尽力而为,故障不传染」（网络层 handler 异常处置同口径）。
+     * 探针单键（eventbus.listener_error_total）：事件名进日志不进键,防指标键爆炸。
+     * Isolated listener invocation: a throwing listener is logged (event name + payload class for attribution)
+     * and counted, never rethrown — delivery is per-listener best effort and failures do not cascade (the same
+     * stance as the networking handler rule). The probe stays a single key; event names go to the log, keeping
+     * metric-cardinality bounded.
+     */
+    private function invoke(callable $listener, mixed $payload, string $event): void
+    {
+        try {
+            $listener($payload);
+        } catch (\Throwable $e) {
+            PerfProbe::increment('eventbus.listener_error_total');
+            error_log(sprintf(
+                '[SimpleEventBus] listener failed on "%s" (%s): %s',
+                $event,
+                is_object($payload) ? $payload::class : gettype($payload),
+                $e->getMessage(),
+            ));
         }
     }
 

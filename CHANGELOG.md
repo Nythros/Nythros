@@ -21,6 +21,14 @@
 
 ### Added
 
+- **热路径可观测性与监听器故障隔离（[引擎/Event + 引擎/NetworkWorkerman]，平台目标「高可维护」的运行时地基）**：
+  ① `SimpleEventBus` 派发隔离——publish/flush 逐监听器 try/catch,一个坏监听器不再吃掉同事件其余送达
+  （flush 在帧末执行,修复前异常沿栈上抛会吞掉本帧剩余信封+打帧管线;与网络层「handler 崩溃不拖垮消息循环」
+  同纪律,故障计数 eventbus.listener_error_total + 日志归因,事件名进日志不进指标键防基数爆炸;既有语义零锁定
+  经全仓核实,行为变更已在类 docblock 双语声明）;② `WorkermanWebSocketServer::handleMessage` 派发计时——
+  network.dispatch_ms 直方图（finally 口径,异常路径同样入桶）+ network.inbound_messages 计数,经既有
+  PerfSampler→gauge→Prometheus 链路自动导出:「哪类消息吃了帧预算」自此可归因（审计 P0-A 类回归的现形网）。
+  新增隔离行为测试 2 例（publish 续送+计数恰一、flush 循环不断），错误帧既有 15 例语义不变全绿。
 - **exporter 运维安全网三件套（上线前必做闭环,「Redis 管热数据」模型的监控补齐）**：
   ① [框架/Observability] `PerfSampler` 连接记忆化（照 RedisFriendStore 先例缓存工厂产物;失败即丢弃
   连接下一轮重连,保留自愈性;审计 P1-D 的「每 5s connect+auth+select 连接 churn」消除）;

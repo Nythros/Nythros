@@ -197,6 +197,49 @@ final class SimpleEventBusTest extends TestCase
         self::assertSame([['id' => 'player-1']], $received, 'publish 必须保持同步并传递 array 负载，不受队列化影响。Publish must stay synchronous and pass array payloads, unaffected by queueing.');
     }
 
+    public function testPublishIsolatesThrowingListenerAndDeliversToRest(): void
+    {
+        $bus = new SimpleEventBus();
+        $after = [];
+        PerfProbe::drain(); // 清场：计数断言只看本用例增量 Clear the window so the counter asserts only this case's delta
+
+        $bus->subscribe('boom', static function (array $payload): void {
+            throw new \RuntimeException('listener exploded');
+        });
+        $bus->subscribe('boom', static function (array $payload) use (&$after): void {
+            $after[] = $payload;
+        });
+
+        $bus->publish('boom', ['id' => 'x']); // 不外抛=用例不炸即过；送达与计数在下面断言 no rethrow = the case survives; delivery/count below
+
+        self::assertSame([['id' => 'x']], $after, '一个监听器抛异常不得吃掉同事件后续监听器的送达 a throwing listener must not eat later listeners of the same event');
+        self::assertSame(1, PerfProbe::drain()['counters']['eventbus.listener_error_total'] ?? 0, '故障计数恰 +1 exactly one error counted');
+    }
+
+    public function testFlushIsolatesThrowingListenerAndKeepsEnvelopeLoop(): void
+    {
+        $bus = new SimpleEventBus();
+        $seenA = 0;
+        $seenB = 0;
+
+        // A 监听器抛异常：同一次 flush 的后续 B 信封必须照常送达、帧管线不中断（修复前异常打断整个 flush 循环）
+        // A throwing A-listener must not eat the B envelope later in the same flush (pre-fix it aborted the loop)
+        $bus->subscribe(EventEnvelope::TYPE_AOI_ENTER, static function (EventEnvelope $envelope) use (&$seenA): void {
+            $seenA++;
+            throw new \RuntimeException('flush loop listener exploded');
+        });
+        $bus->subscribe(EventEnvelope::TYPE_AOI_LEAVE, static function (EventEnvelope $envelope) use (&$seenB): void {
+            $seenB++;
+        });
+
+        $bus->publishEnvelope($this->makeEnvelope('src', EventEnvelope::TYPE_AOI_ENTER));
+        $bus->publishEnvelope($this->makeEnvelope('src', EventEnvelope::TYPE_AOI_LEAVE));
+        $bus->flush();
+
+        self::assertSame(1, $seenA, '抛异常的监听器自身确实被调用 the throwing listener did run');
+        self::assertSame(1, $seenB, '异常不得中断 flush 循环中后续信封的分发 the flush loop must continue');
+    }
+
     /**
      * 构造测试用事件信封。
      * Builds a test event envelope.
