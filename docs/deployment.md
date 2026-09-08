@@ -82,7 +82,10 @@ scrape_configs:
 
 告警建议（初版阈值，按实测校准）：`nythros_perf_hist_bucket{le="64"}` 增速 > 0（帧耗时触顶）、
 `eventbus.dropped_total` 增速 > 0（事件总线拥塞丢弃）、`last_sample_timestamp_seconds` 停滞 > 60s
-（采样器或实例失联）。自检：`php packages/demo/bin/metrics-exporter.php --self-test`。
+（采样器或实例失联）、`nythros_perf_gauge{service="storage-exporter",metric="backlog"}` 持续 > 5000
+（导出积压，落盘老化）、storage-exporter 的 `last_sample_timestamp_seconds` 停滞 > 30s（exporter 失联，
+数据不丢但报表停摆——重启归 systemd/编排，PEL 未 ack 条目自动重放）。自检：`php packages/demo/bin/metrics-exporter.php --self-test`；
+故障演练：`php benchmarks/fault-drill.php --scenario=exporter`。
 
 ## 5. 滚动更新
 

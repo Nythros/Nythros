@@ -21,6 +21,18 @@
 
 ### Added
 
+- **exporter 运维安全网三件套（上线前必做闭环,「Redis 管热数据」模型的监控补齐）**：
+  ① [框架/Observability] `PerfSampler` 连接记忆化（照 RedisFriendStore 先例缓存工厂产物;失败即丢弃
+  连接下一轮重连,保留自愈性;审计 P1-D 的「每 5s connect+auth+select 连接 churn」消除）;
+  ② [demo/运维工具链] backlog 观测链路——run-exporter 每 5s 把 PEL 滞留（XPENDING）+ Stream 长度
+  （XLEN）写入 `nythros:perf:storage-exporter:gauge` 键族 + `:last` 活性心跳;metrics-exporter 新增
+  gauge 键族暴露 → `nythros_perf_gauge{service="storage-exporter",metric="backlog|stream_len"}`,
+  exporter 失联=lag 停走可告警（deployment §4 告警面）;③ [demo/工具链] fault-drill 新增第四场景
+  `exporter`——kill 全树（Workerman proctitle 双形态匹配:args 含 run-exporter.php 的 master/manager +
+  改名后的孤儿 worker,两遍杀+死透轮询,防「只杀 worker 被 master 重生」的假绿）→ 断言宕机期间登录
+  不受影响（解耦证明）+ 心跳停更可观测（kill 后两次跨周期读数相等,无竞态判定）→ 手动重启（生产归
+  systemd,bin/server 只收割）→ 断言心跳恢复;WSL 实跑三项 PASS。真实全栈验证:gauge 键产出
+  backlog/stream_len=0（消费健康）、phase5 11/11 不受 storage 组影响。
 - **登录 bcrypt 恒时化 + 成本可调（主循环 CPU 剥离收尾,审计 P0-A 闭环）**：`StaticAuthenticator`
   对不存在账号也执行一次 dummy 哈希 `password_verify`（恒时路径,「账号不存在」与「密码错误」同耗时
   同异常,关闭时序枚举侧漏;dummy 惰性生成,构造零 bcrypt）;新增 `NYTHROS_BCRYPT_COST`（缺省 9）

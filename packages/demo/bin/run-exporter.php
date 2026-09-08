@@ -259,6 +259,10 @@ $worker->onWorkerStart = static function () use ($options): void {
         static $redis = null;
         static $claimCursor = '0-0';
         static $storage = null;
+        static $tick = 0;
+        // backlog 上报周期（tick 数）:0.5s × 10 = 5s,与 PerfSampler 缺省同节奏,不给消费轮加显著负载
+        // Backlog report cadence (ticks): 0.5s × 10 = 5s, the PerfSampler default's rhythm, no added consume cost
+        $reportEveryTicks = 10;
 
         try {
             if ($redis === null) {
@@ -267,6 +271,33 @@ $worker->onWorkerStart = static function () use ($options): void {
             }
             if ($storage === null) {
                 $storage = new MySqlStorage($connectPdo);
+            }
+
+            // ③ 积压监控（上线安全网）:每 $reportEveryTicks tick 把 PEL 滞留数 + Stream 长度写进
+            //    perf gauge 键族（metrics-exporter 已自动发现 → nythros_perf_gauge{service="storage-exporter"}），
+            //    并刷新 :last 活性心跳——exporter 失联时 lag 停走即告警（deployment §4）。失败静默（不影响消费）。
+            // ③ Backlog watchdog (the pre-launch safety net): every N ticks publish the PEL pending count + Stream
+            //    length into the perf gauge family (metrics-exporter auto-discovers it as
+            //    nythros_perf_gauge{service="storage-exporter"}) and refresh the :last liveness heartbeat — a stalled
+            //    lag alerts on exporter loss (deployment §4). Failures are silent (never block consumption).
+            if (++$tick % $reportEveryTicks === 0) {
+                try {
+                    $pending = $redis->xPending($options['streamKey'], $options['group']);
+                    // phpredis summary 两形态兼容:关联 ['count'=>N,…] 与索引 [N,start,end,consumers]
+                    // phpredis summary has two shapes across versions: the assoc ['count'=>N,…] and the indexed [N,start,end,consumers]
+                    $backlog = is_array($pending) ? (int) ($pending['count'] ?? $pending[0] ?? 0) : 0;
+                    $streamLen = (int) $redis->xLen($options['streamKey']);
+                    $gaugeKey = 'nythros:perf:storage-exporter:gauge';
+                    $pipeline = $redis->multi(\Redis::PIPELINE);
+                    $pipeline->hMSet($gaugeKey, ['backlog' => (string) $backlog, 'stream_len' => (string) $streamLen]);
+                    $pipeline->set('nythros:perf:storage-exporter:last', (string) json_encode([
+                        'ts' => microtime(true),
+                        'serviceId' => 'storage-exporter',
+                    ], JSON_UNESCAPED_UNICODE));
+                    $pipeline->exec();
+                } catch (\Throwable $e) {
+                    error_log('[run-exporter] backlog report failed: ' . $e->getMessage());
+                }
             }
 
             $rounds = [];

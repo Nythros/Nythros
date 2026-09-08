@@ -51,23 +51,25 @@ function scanKeys(\Redis $redis, string $pattern): \Generator
 }
 
 /**
- * 读取全部 PerfSampler 键，返回 serviceId => [counters, hist, totals, last]。
+ * 读取全部 PerfSampler 键，返回 serviceId => [counters, hist, totals, gauge, last]。
+ * gauge 族（storage-exporter 等旁路组件写入）= 瞬时值（backlog/stream_len），非累计。
  *
- * @return array<string, array{counters: array<string,int>, hist: array<string,int>, totals: array<string,float>, last: ?float}>
+ * @return array<string, array{counters: array<string,int>, hist: array<string,int>, totals: array<string,float>, gauge: array<string,float>, last: ?float}>
  */
 function collectPerf(\Redis $redis): array
 {
     $services = [];
-    foreach (['counters', 'hist', 'totals'] as $kind) {
+    // gauge 族：旁路组件（storage-exporter 等）的瞬时值——backlog/stream_len,由组件周期上报
+    foreach (['counters', 'hist', 'totals', 'gauge'] as $kind) {
         foreach (scanKeys($redis, 'nythros:perf:*:' . $kind) as $key) {
             if (!preg_match('/^nythros:perf:(.+):' . $kind . '$/', $key, $m)) {
                 continue;
             }
             $serviceId = $m[1];
-            $services[$serviceId] ??= ['counters' => [], 'hist' => [], 'totals' => [], 'last' => null];
+            $services[$serviceId] ??= ['counters' => [], 'hist' => [], 'totals' => [], 'gauge' => [], 'last' => null];
             $raw = $redis->hGetAll($key) ?: [];
             $services[$serviceId][$kind] = match ($kind) {
-                'totals' => array_map('floatval', $raw),
+                'totals', 'gauge' => array_map('floatval', $raw),
                 default => array_map('intval', $raw),
             };
         }
@@ -96,7 +98,7 @@ function escapeLabel(string $value): string
 /**
  * 把 collectPerf 的产物渲染为 Prometheus 文本格式。
  *
- * @param array<string, array{counters: array<string,int>, hist: array<string,int>, totals: array<string,float>, last: ?float}> $perf
+ * @param array<string, array{counters: array<string,int>, hist: array<string,int>, totals: array<string,float>, gauge: array<string,float>, last: ?float}> $perf
  */
 function renderMetrics(array $perf): string
 {
@@ -185,6 +187,19 @@ function renderMetrics(array $perf): string
         }
     }
 
+    $lines[] = '# HELP nythros_perf_gauge 旁路组件瞬时值仪表（storage-exporter：backlog=PEL 滞留、stream_len=Stream 长度）。';
+    $lines[] = '# TYPE nythros_perf_gauge gauge';
+    foreach ($perf as $serviceId => $s) {
+        foreach ($s['gauge'] as $metric => $value) {
+            $lines[] = sprintf(
+                'nythros_perf_gauge{service="%s",metric="%s"} %s',
+                escapeLabel($serviceId),
+                escapeLabel($metric),
+                rtrim(rtrim(number_format($value, 3, '.', ''), '0'), '.')
+            );
+        }
+    }
+
     $lines[] = '# HELP nythros_perf_last_sample_timestamp_seconds 最近一次 PerfSampler 采样时间戳。';
     $lines[] = '# TYPE nythros_perf_last_sample_timestamp_seconds gauge';
     foreach ($perf as $serviceId => $s) {
@@ -217,9 +232,17 @@ function runSelfTest(): int
             'counters' => ['world.envelope_published' => 42, 'network.out_bytes' => 1024],
             'hist' => ['world.frame_ms.2' => 7, 'world.frame_ms.3' => 3, 'other.metric.0' => 5],
             'totals' => ['world.frame_ms' => 12.5],
+            'gauge' => [],
             'last' => 1725000000.125,
         ],
-        'social-gateway' => ['counters' => [], 'hist' => [], 'totals' => [], 'last' => null],
+        'social-gateway' => ['counters' => [], 'hist' => [], 'totals' => [], 'gauge' => [], 'last' => null],
+        'storage-exporter' => [
+            'counters' => [],
+            'hist' => [],
+            'totals' => [],
+            'gauge' => ['backlog' => 250, 'stream_len' => 42],
+            'last' => 1725000000.5,
+        ],
     ];
     $doc = renderMetrics($perf);
     $assert(str_contains($doc, 'nythros_perf_counter{service="map-1#ch-1",event="world.envelope_published"} 42'), '计数器逐事件暴露');
@@ -228,9 +251,11 @@ function runSelfTest(): int
     $assert(str_contains($doc, 'le="+Inf"} 10'), '终止 +Inf 桶存在');
     $assert(str_contains($doc, 'nythros_perf_hist{service="map-1#ch-1",metric="other.metric",bucket="0"} 5'), '非 frame_ms 原始桶暴露');
     $assert(str_contains($doc, 'nythros_perf_total_ms{service="map-1#ch-1",metric="world.frame_ms"} 12.5'), '累计值暴露');
+    $assert(str_contains($doc, 'nythros_perf_gauge{service="storage-exporter",metric="backlog"} 250'), 'gauge 族瞬时值暴露（exporter backlog）');
+    $assert(str_contains($doc, 'nythros_perf_gauge{service="storage-exporter",metric="stream_len"} 42'), 'gauge 族 stream_len 暴露');
     $assert(str_contains($doc, 'nythros_perf_last_sample_timestamp_seconds{service="map-1#ch-1"} 1725000000.125'), '最近采样时间戳暴露');
     $assert(!str_contains($doc, 'social-gateway'), '无采样数据的 service 不产生指标行');
-    $assert(substr_count($doc, "HELP") === 5, 'HELP 头数量正确');
+    $assert(substr_count($doc, "HELP") === 6, 'HELP 头数量正确');
 
     if ($failures !== []) {
         printf("[metrics-exporter] SELF-TEST FAIL：%d 项断言未过\n", count($failures));
