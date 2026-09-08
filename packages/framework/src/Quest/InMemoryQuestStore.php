@@ -9,7 +9,7 @@ namespace Nythros\Framework\Quest;
  * The in-memory quest-progress store: the in-process QuestStoreInterface implementation (for unit tests and
  * deployments without external storage).
  */
-final class InMemoryQuestStore implements QuestStoreInterface
+final class InMemoryQuestStore implements QuestStoreInterface, QuestBatchStoreInterface
 {
     /** @var array<string, array<string, QuestProgress>> uid => questId => 进度 uid => questId => progress. */
     private array $records = [];
@@ -17,6 +17,16 @@ final class InMemoryQuestStore implements QuestStoreInterface
     public function save(QuestProgress $progress): void
     {
         $this->records[$progress->uid][$progress->questId] = $progress;
+    }
+
+    public function saveMany(array $progresses): void
+    {
+        // 内存后端无往返概念，批量 = 逐条覆盖写（仅为与 Redis 后端的接口能力对齐）
+        // An in-memory backend has no round-trip notion, so batch is just per-record overwrite (kept interface-
+        // compatible with the Redis backend)
+        foreach ($progresses as $progress) {
+            $this->save($progress);
+        }
     }
 
     public function get(string $uid, string $questId): ?QuestProgress

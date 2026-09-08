@@ -63,6 +63,9 @@ jobs:
       - name: Public symbol gate (@internal, ADR-023/024)
         run: composer internal
 
+      - name: Hot-path IO-free gate (blueprint/34 tick 纯内存纪律)
+        run: composer io-free
+
       - name: API reference in sync (docs/api-reference.md)
         run: composer api
 

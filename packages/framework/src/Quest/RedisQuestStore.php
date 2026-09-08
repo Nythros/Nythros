@@ -22,7 +22,7 @@ namespace Nythros\Framework\Quest;
  * Non-atomic read-modify-write at demo scale on a single Redis (progress is a single key/field per record, carrying
  * no team-level cross-process invariant; same stance as FriendStore).
  */
-final class RedisQuestStore implements QuestStoreInterface
+final class RedisQuestStore implements QuestStoreInterface, QuestBatchStoreInterface
 {
     /** 任务进度 hash 键子前缀（相对基前缀） Quest-progress hash key sub-prefix (relative to the base prefix). */
     private const QUEST_SUB_PREFIX = 'quest:';
@@ -56,14 +56,63 @@ final class RedisQuestStore implements QuestStoreInterface
         $this->redis()->hSet(
             $this->questKey($progress->uid),
             $progress->questId,
-            (string) json_encode([
-                'uid' => $progress->uid,
-                'questId' => $progress->questId,
-                'count' => $progress->count,
-                'completed' => $progress->completed,
-                'rewarded' => $progress->rewarded,
-            ], JSON_THROW_ON_ERROR),
+            $this->encodeField($progress),
         );
+    }
+
+    /**
+     * 批量整记录回写（QuestBatchStoreInterface）：按 uid 归组，同 uid 多任务合并为一次 hMSet，
+     * 多 uid 再经 pipeline 合并为一次往返——写回缓冲的 flush 点用它把「N 脏进度 N 往返」压成 1。
+     * 空列表零操作；失败抛出（由调用方留脏重试）。
+     * Batch whole-record write-back (the QuestBatchStoreInterface): groups by uid, merges a uid's multiple quests
+     * into one hMSet, and merges cross-uid hMSets into a single round-trip via a pipeline — the write-back buffer's
+     * flush uses it to collapse "N dirty records / N round-trips" into one. An empty list is a no-op; failures
+     * throw (the caller keeps them dirty for retry).
+     *
+     * @param list<QuestProgress> $progresses 待回写进度 Records to write back.
+     */
+    public function saveMany(array $progresses): void
+    {
+        if ($progresses === []) {
+            return;
+        }
+
+        // 按 uid 归组为 hash 字段表（questId => 编码值），数字/非法 uid 一并白名单校验
+        // Group into hash field maps by uid (questId => encoded value), validating each uid against the whitelist
+        $byUid = [];
+        foreach ($progresses as $progress) {
+            $this->assertUid($progress->uid);
+            $byUid[$progress->uid][$progress->questId] = $this->encodeField($progress);
+        }
+
+        if (count($byUid) === 1) {
+            // 单 uid：直接一次 hMSet，无需 pipeline 开销
+            // A single uid: one hMSet directly, no pipeline overhead
+            $uid = array_key_first($byUid);
+            $this->redis()->hMSet($this->questKey((string) $uid), $byUid[$uid]);
+
+            return;
+        }
+
+        // 多 uid：pipeline 合并为一次往返
+        // Multiple uids: merge into one round-trip with a pipeline
+        $pipeline = $this->redis()->multi(\Redis::PIPELINE);
+        foreach ($byUid as $uid => $fields) {
+            $pipeline->hMSet($this->questKey((string) $uid), $fields);
+        }
+        $pipeline->exec();
+    }
+
+    /** 单条进度编码为 hash 字段值（save/saveMany 共用口径，整体覆盖语义）。 Encodes one progress as the hash field value (shared by save/saveMany, whole-record semantics). */
+    private function encodeField(QuestProgress $progress): string
+    {
+        return (string) json_encode([
+            'uid' => $progress->uid,
+            'questId' => $progress->questId,
+            'count' => $progress->count,
+            'completed' => $progress->completed,
+            'rewarded' => $progress->rewarded,
+        ], JSON_THROW_ON_ERROR);
     }
 
     public function get(string $uid, string $questId): ?QuestProgress

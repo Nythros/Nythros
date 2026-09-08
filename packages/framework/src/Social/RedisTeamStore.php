@@ -338,12 +338,18 @@ LUA;
         $this->assertTeamId($teamId);
         $redis = $this->redis();
 
-        $rawLeader = $redis->hGet($this->teamKey($teamId), 'leaderUid');
+        // leaderUid 与 members 同在一个 team hash：合并为一次 hMGet（旧实现两条 hGet = 2 往返；
+        // 登录链 findByUid→get 每次在队成员登录都走此处）。字段缺失时 hMGet 返回 false 值,判定口径不变。
+        // leaderUid and members live in the same team hash: merged into one hMGet (the old two hGet calls cost
+        // 2 round-trips; the login chain's findByUid→get hits this on every member login). A missing field
+        // surfaces as false from hMGet, so the validation stance stays identical.
+        $fields = $redis->hMGet($this->teamKey($teamId), ['leaderUid', 'members']);
+        $rawLeader = is_array($fields) ? ($fields['leaderUid'] ?? false) : false;
         if (!is_string($rawLeader) || $rawLeader === '') {
             return null;
         }
 
-        $rawMembers = $redis->hGet($this->teamKey($teamId), 'members');
+        $rawMembers = $fields['members'] ?? false;
         if (!is_string($rawMembers)) {
             return null;
         }

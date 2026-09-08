@@ -165,6 +165,47 @@ final class QuestService
     }
 
     /**
+     * 会话预热（写回缓冲接线，主循环 IO 剥离）：委托 store 在入场时一次性载入该 uid 的全部进度——
+     * 仅当 store 是 CachedQuestStore 时生效（RedisQuestStore/InMemoryQuestStore 直连无缓冲则零操作）。
+     * 组装层在玩家 attach 后调用，令后续 combat.kill/pickup 的进度读写全走内存。
+     * Session preload (the write-back-buffer wiring, the hot-path IO strip): delegates to the store to load one
+     * uid's whole progress set at attach time — effective only when the store is a CachedQuestStore (a direct
+     * RedisQuestStore/InMemoryQuestStore is a no-op). The assembly layer calls it after a player attaches, so the
+     * later combat.kill/pickup progress reads/writes all stay in memory.
+     */
+    public function preload(string $uid): void
+    {
+        if ($this->store instanceof CachedQuestStore) {
+            $this->store->preload($uid);
+        }
+    }
+
+    /**
+     * 会话淘汰（断连/登出收尾）：回写该 uid 的未冲刷进度并释放缓冲；非写回后端零操作。
+     * Session eviction (the disconnect/logout close-out): flushes one uid's unflushed progress and releases the
+     * buffer; a no-op for non-write-back backends.
+     */
+    public function evict(string $uid): void
+    {
+        if ($this->store instanceof CachedQuestStore) {
+            $this->store->evict($uid);
+        }
+    }
+
+    /**
+     * 全量兜底冲刷：把所有未回写的脏进度写回后端（供 30s 定时兜底；崩溃丢失窗口的边界，同 ArchivePipeline
+     * 裁决 4）。非写回后端零操作。
+     * The periodic backstop flush: writes every unflushed dirty progress back to the backend (for the 30s fallback;
+     * the crash-loss-window boundary, the same as ArchivePipeline's ruling 4). A no-op for non-write-back backends.
+     */
+    public function flushPending(): void
+    {
+        if ($this->store instanceof CachedQuestStore) {
+            $this->store->flushAll();
+        }
+    }
+
+    /**
      * 进度推进公共路径：遍历匹配进度源与目标的任务——completed 后短路；链上未解锁任务忽略（P2 链式解锁）；
      * 累计后越线即置 completed 并回存。
      * The shared advancement path: walks quests matching the source and target — short-circuits past completion;

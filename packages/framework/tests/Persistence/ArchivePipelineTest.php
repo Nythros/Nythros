@@ -60,6 +60,110 @@ final class ArchivePipelineTest extends TestCase
         self::assertSame([], $storage->saveCalls);
     }
 
+    public function testScheduleFlushIdWithoutTimerFallsBackToSyncFlushId(): void
+    {
+        $storage = new RecordingStorage();
+        // 无定时器装配（单测/纯消息模式）：scheduleFlushId 保持旧同步点语义
+        // No-timer assembly (unit-test / message-only mode): scheduleFlushId keeps the legacy sync-point semantics
+        $pipeline = new ArchivePipeline($storage, 'players', null, new ArchiveClock());
+
+        $pipeline->markDirty('u1', ['hp' => 100]);
+        $pipeline->scheduleFlushId('u1');
+
+        self::assertCount(1, $storage->saveCalls);
+        self::assertSame('u1', $storage->saveCalls[0]['id']);
+    }
+
+    public function testScheduleFlushIdCoalescesIntoOneBatch(): void
+    {
+        $storage = new RecordingStorage();
+        $timer = new ArchiveFakeTimer();
+        $pipeline = $this->pipeline($storage, $timer, new ArchiveClock());
+
+        // 掉线风暴：三条断连同窗登记 → 处理器零往返，到窗一次 saveBatch
+        // A disconnect storm: three schedules coalesce → zero round-trips in the handler, one saveBatch at the window
+        $pipeline->markDirty('u1', ['hp' => 10]);
+        $pipeline->markDirty('u2', ['hp' => 20]);
+        $pipeline->markDirty('u3', ['hp' => 30]);
+        $pipeline->scheduleFlushId('u1');
+        $pipeline->scheduleFlushId('u2');
+        $pipeline->scheduleFlushId('u3');
+
+        self::assertSame([], $storage->saveCalls, 'scheduling must not save synchronously');
+        self::assertSame([], $storage->batchCalls, 'batching waits for the coalescing window');
+        // 构造期 30s 兜底占一位 + 紧急窗只挂一次（三个 schedule 共享一个窗）
+        // The constructor's 30s fallback takes slot 1; the urgent window arms exactly once for all three schedules
+        self::assertSame(2, $timer->count(), 'the coalescing window must arm only once');
+
+        $timer->triggerLast();
+
+        self::assertCount(1, $storage->batchCalls);
+        self::assertSame(['u1', 'u2', 'u3'], array_keys($storage->batchCalls[0]['records']));
+        self::assertSame(['hp' => 20], $storage->load('players', 'u2'));
+
+        // 到窗后重新挂窗：下一次 schedule 会再登记一个新回调（窗不复用已到期回调）
+        // After the window fires, the next schedule arms a fresh callback (a fired window is never reused)
+        $pipeline->markDirty('u4', ['hp' => 40]);
+        $pipeline->scheduleFlushId('u4');
+        self::assertSame(3, $timer->count());
+
+        // 非脏 id 登记为空操作（不挂窗）
+        // Scheduling a never-dirty id is a no-op (never arms a window)
+        $before = $timer->count();
+        $pipeline->scheduleFlushId('never-dirty');
+        self::assertSame($before, $timer->count());
+    }
+
+    public function testUrgentFlushKeepsFailedIdsForFallback(): void
+    {
+        $storage = new RecordingStorage();
+        $timer = new ArchiveFakeTimer();
+        $clock = new ArchiveClock();
+        $pipeline = $this->pipeline($storage, $timer, $clock);
+
+        $pipeline->markDirty('u1', ['hp' => 10]);
+        $pipeline->markDirty('u2', ['hp' => 20]);
+        $pipeline->scheduleFlushId('u1');
+        $pipeline->scheduleFlushId('u2');
+
+        // 批量部分失败：u2 留脏，30s 兜底继续接管（裁决 6 口径）
+        // A partial batch failure: u2 stays dirty and the 30s fallback keeps owning it (ruling 6)
+        $storage->batchFailurePlan = [['u2']];
+        $timer->triggerLast();
+
+        self::assertSame(['hp' => 10], $storage->load('players', 'u1'));
+        self::assertNull($storage->load('players', 'u2'));
+
+        $clock->now = ArchivePipeline::FLUSH_INTERVAL_SECONDS;
+        $pipeline->periodicFlush();
+        self::assertSame(['hp' => 20], $storage->load('players', 'u2'));
+    }
+
+    public function testUrgentFlushDoesNotPostponePeriodicFallback(): void
+    {
+        $storage = new RecordingStorage();
+        $timer = new ArchiveFakeTimer();
+        $clock = new ArchiveClock();
+        $pipeline = $this->pipeline($storage, $timer, $clock);
+
+        $pipeline->markDirty('u1', ['hp' => 10]);
+        $pipeline->scheduleFlushId('u1');
+        $timer->triggerLast();
+
+        // 紧急冲刷 = 强制同步点：不推进 lastFallbackAt（与显式 flush 同规则）——
+        // 构造期 t=0 的兜底在 t<30 仍会因门控跳过、t≥30 正常执行
+        // The urgent flush is a forced sync point and must not advance lastFallbackAt (same rule as an explicit
+        // flush) — the constructor-armed fallback at t=0 still skips under the gate before t=30 and runs after
+        $pipeline->markDirty('u2', ['hp' => 20]);
+        $clock->now = 10.0;
+        $pipeline->periodicFlush();
+        self::assertNull($storage->load('players', 'u2'));
+
+        $clock->now = ArchivePipeline::FLUSH_INTERVAL_SECONDS;
+        $pipeline->periodicFlush();
+        self::assertSame(['hp' => 20], $storage->load('players', 'u2'));
+    }
+
     public function testPeriodicFallbackFlushesAfterThirtySeconds(): void
     {
         $storage = new RecordingStorage();
@@ -391,6 +495,25 @@ final class ArchiveFakeTimer implements TimerInterface
     public function trigger(): void
     {
         foreach ($this->callbacks as $callback) {
+            $callback();
+        }
+    }
+
+    /** 已登记回调数（断言「只挂一个窗」类语义）。 Count of registered callbacks (asserts one-window-only semantics). */
+    public function count(): int
+    {
+        return count($this->callbacks);
+    }
+
+    /**
+     * 仅触发最后登记的回调（驱动紧急合并窗，不误触发构造期的 30s 兜底）。
+     * Fires only the last-registered callback (drives the urgent coalescing window without also firing the
+     * constructor's 30s fallback).
+     */
+    public function triggerLast(): void
+    {
+        $callback = end($this->callbacks);
+        if ($callback !== false) {
             $callback();
         }
     }

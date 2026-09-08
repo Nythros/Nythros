@@ -22,6 +22,7 @@
         "cs:fix": "php-cs-fixer fix",
         "stan": "phpstan analyse --memory-limit=1G",
         "internal": "php tools/check-internal.php --self-test && php tools/check-internal.php",
+        "io-free": "php tools/check-io-free-path.php --self-test && php tools/check-io-free-path.php",
         "api": "php tools/generate-api-docs.php --check",
         "test": "phpunit",
         "smoke:skeleton": "bash tools/skeleton-smoke.sh packagist",
