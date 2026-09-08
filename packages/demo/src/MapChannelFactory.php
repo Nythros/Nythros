@@ -316,28 +316,31 @@ final class MapChannelFactory
         $roomHub = null;
         $hordeConfig = null;
         if (getenv('NYTHROS_ROOMS') === '1') {
-            $pluginRegistry->load(new HordePlugin(), $container, $dispatcher);
-            $pluginRegistry->enable('horde');
-            /** @var HordeConfig $hordeConfig 插件注册进 Container 的 horde 配置 The horde config registered by the plugin. */
-            $hordeConfig = $container->get(HordePlugin::CONFIG_ID);
+            // 能力开关是 env 门之上的第二道闸（NYTHROS_FEATURES 排除 horde 时 load 跳过 → 整块不装配）
+            // The feature flag is a second gate above the env gate (load skips when NYTHROS_FEATURES excludes horde)
+            if ($pluginRegistry->load(new HordePlugin(), $container, $dispatcher)) {
+                $pluginRegistry->enable('horde');
+                /** @var HordeConfig $hordeConfig 插件注册进 Container 的 horde 配置 The horde config registered by the plugin. */
+                $hordeConfig = $container->get(HordePlugin::CONFIG_ID);
 
-            // 准入上限与动态周期上限（P9c）：env 注入——maxRooms 触顶时 create 抛 OverflowException
-            // （RoomHub 转译为 busy 拒绝），maxDynamicPeriodMs 为预算压力下房间周期膨胀地板。
-            // The admission cap and dynamic-period ceiling (the P9c): env-injected — create() throws an
-            // OverflowException when maxRooms is full (RoomHub translates it into a busy rejection), and
-            // maxDynamicPeriodMs backstops the room-period inflation under budget pressure.
-            $maxRooms = 0;
-            $rawMaxRooms = getenv('NYTHROS_ROOMS_MAX');
-            if (is_string($rawMaxRooms) && preg_match('/^\d+$/', trim($rawMaxRooms)) === 1) {
-                $maxRooms = (int) trim($rawMaxRooms);
+                // 准入上限与动态周期上限（P9c）：env 注入——maxRooms 触顶时 create 抛 OverflowException
+                // （RoomHub 转译为 busy 拒绝），maxDynamicPeriodMs 为预算压力下房间周期膨胀地板。
+                // The admission cap and dynamic-period ceiling (the P9c): env-injected — create() throws an
+                // OverflowException when maxRooms is full (RoomHub translates it into a busy rejection), and
+                // maxDynamicPeriodMs backstops the room-period inflation under budget pressure.
+                $maxRooms = 0;
+                $rawMaxRooms = getenv('NYTHROS_ROOMS_MAX');
+                if (is_string($rawMaxRooms) && preg_match('/^\d+$/', trim($rawMaxRooms)) === 1) {
+                    $maxRooms = (int) trim($rawMaxRooms);
+                }
+                $maxPeriodMs = 50;
+                $rawMaxPeriod = getenv('NYTHROS_ROOMS_MAX_PERIOD_MS');
+                if (is_string($rawMaxPeriod) && preg_match('/^\d+$/', trim($rawMaxPeriod)) === 1) {
+                    $maxPeriodMs = max(15, (int) trim($rawMaxPeriod));
+                }
+                $roomManager = new RoomInstanceManager(null, self::ROOM_TICK_BUDGET_MS, $world->getEventBus(), $maxPeriodMs, $maxRooms);
+                $roomHub = new RoomHub($roomManager, $world, $skills, $items, $random, $dropTable, $typeIndex, $hordeConfig);
             }
-            $maxPeriodMs = 50;
-            $rawMaxPeriod = getenv('NYTHROS_ROOMS_MAX_PERIOD_MS');
-            if (is_string($rawMaxPeriod) && preg_match('/^\d+$/', trim($rawMaxPeriod)) === 1) {
-                $maxPeriodMs = max(15, (int) trim($rawMaxPeriod));
-            }
-            $roomManager = new RoomInstanceManager(null, self::ROOM_TICK_BUDGET_MS, $world->getEventBus(), $maxPeriodMs, $maxRooms);
-            $roomHub = new RoomHub($roomManager, $world, $skills, $items, $random, $dropTable, $typeIndex, $hordeConfig);
         }
 
         // R4 mmorpg 类型模块试点装配（NYTHROS_MMORPG=1 启用，缺省关闭——存量部署零影响，比照 NYTHROS_ROOMS 先例）：
@@ -353,9 +356,9 @@ final class MapChannelFactory
         // list<QuestChain> injected into MmorpgConfig.questChains, handed to QuestService by the gameplay wiring
         // (chained unlocking judged by the framework rules).
         $mmorpgConfig = null;
-        if (getenv('NYTHROS_MMORPG') === '1') {
-            $mmorpgConfig = self::mmorpgConfigFromEnv();
-            $pluginRegistry->load(new MmorpgPlugin(config: $mmorpgConfig), $container, $dispatcher);
+        if (getenv('NYTHROS_MMORPG') === '1' && $pluginRegistry->load(new MmorpgPlugin(config: self::mmorpgConfigFromEnv()), $container, $dispatcher)) {
+            // 能力开关第二闸:NYTHROS_FEATURES 排除 mmorpg 时 load 返回 false,整块跳过(与 horde 同型)
+            // The second feature-flag gate: load returns false when NYTHROS_FEATURES excludes mmorpg (same shape as horde)
             $pluginRegistry->enable('mmorpg');
             /** @var MmorpgConfig $mmorpgConfig 插件注册进 Container 的 mmorpg 配置 The mmorpg config registered by the plugin. */
             $mmorpgConfig = $container->get(MmorpgPlugin::CONFIG_ID);

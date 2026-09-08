@@ -5,7 +5,7 @@
 > 未标 `@internal` 的类/枚举（ADR-023/024）。`@internal` 实现类不构成 API 承诺，业务层只依赖 Contracts 接口。
 > 指南（用法与教程）见 [docs/ 索引](https://github.com/nythros/nythros/tree/master#文档索引)；本文件只做「有什么、叫什么、签名单什么」的索引。
 > 摘要中的 P 编号（P9/P11/P15…）是阶段验收记录的追溯锚点，对应 [blueprint/](https://github.com/nythros/nythros/tree/master/blueprint) 目录的编号验收文档。
-168 个公开符号（engine + framework）。
+170 个公开符号（engine + framework）。
 
 
 ## nythros/engine
@@ -887,13 +887,14 @@ horde 玩法参数化配置（R4 类型模块试点，ADR-020 §4）：波次刷
 | `static` `default(): self` | 缺省配置：与 RoomHub 迁移前常量逐值一致（网格 x∈[24,62] y 起点 -24 步距 2、怪 maxHp=12、 |
 
 #### `HordePlugin`
-Horde 插件（R4 类型模块试点，ADR-020 §4「命名空间 + PluginRegistry 插件形态」）： · implements `Nythros\Framework\Plugin\PluginInterface`
+Horde 插件（R4 类型模块试点，ADR-020 §4「命名空间 + PluginRegistry 插件形态」）： · implements `Nythros\Framework\Plugin\PluginInterface`, `Nythros\Framework\Plugin\FeaturePluginInterface`
 
 | 方法 | 说明 |
 |---|---|
 | `__construct(?Nythros\Framework\Game\Horde\HordeConfig $config = NULL)` |  |
 | `disable(): void` |  |
 | `enable(): void` |  |
+| `featureName(): string` |  |
 | `name(): string` |  |
 | `register(Nythros\Framework\Container\ContainerInterface $container, Nythros\Framework\Event\EventDispatcherInterface $dispatcher): void` | 加载：向 Container 注册 horde 配置（幂等；构造期未显式给定时注册缺省配置）。 |
 | `uninstall(Nythros\Framework\Container\ContainerInterface $container, Nythros\Framework\Event\EventDispatcherInterface $dispatcher): void` |  |
@@ -956,13 +957,14 @@ mmorpg 玩法参数化配置（R4 类型模块试点，ADR-020 §4）：威胁/�
 | `static` `default(): self` | 缺省配置：威胁不衰减（threatDecayPerSec=0）、无上限（maxThreat=0）、嘲讽倍率 1.0、aggroRange 10 |
 
 #### `MmorpgPlugin`
-Mmorpg 插件（R4 类型模块试点，ADR-020 §4「命名空间 + PluginRegistry 插件形态」）： · implements `Nythros\Framework\Plugin\PluginInterface`
+Mmorpg 插件（R4 类型模块试点，ADR-020 §4「命名空间 + PluginRegistry 插件形态」）： · implements `Nythros\Framework\Plugin\PluginInterface`, `Nythros\Framework\Plugin\FeaturePluginInterface`
 
 | 方法 | 说明 |
 |---|---|
 | `__construct(?Nythros\Framework\Game\Mmorpg\MmorpgConfig $config = NULL)` |  |
 | `disable(): void` |  |
 | `enable(): void` |  |
+| `featureName(): string` |  |
 | `name(): string` |  |
 | `register(Nythros\Framework\Container\ContainerInterface $container, Nythros\Framework\Event\EventDispatcherInterface $dispatcher): void` | 加载：向 Container 注册 mmorpg 配置（幂等；构造期未显式给定时注册缺省配置）。 |
 | `uninstall(Nythros\Framework\Container\ContainerInterface $container, Nythros\Framework\Event\EventDispatcherInterface $dispatcher): void` |  |
@@ -1327,6 +1329,23 @@ Redis 权威 + Stream 导出管线（PersistPipelineInterface 的第二实现，
 
 ### `Nythros\Framework\Plugin`
 
+#### `FeatureFlags`
+能力开关表（声明式装配的第一块地基）：把「哪些能力启用」从代码注释里解放出来。
+
+| 方法 | 说明 |
+|---|---|
+| `__construct(?array $whitelist, array $overrides = [...])` | null = whitelist unset (everything defaults on); [] = explicit empty (all off) |
+| `static` `fromEnvironment(): self` | 从进程环境变量解析（组装入口，Workerman 常驻进程启动期读一次）。 |
+| `isEnabled(string $feature, bool $default = true): bool` | 该能力是否启用。无覆盖、无白名单时按 $default（缺省开）。 |
+| `whitelist(): ?array` | 白名单（null=未启用白名单）。只读观测面（测试/诊断）。 |
+
+#### `Nythros\Framework\Plugin\FeaturePluginInterface`
+能力自声明接口（可选扩展，能力探测式，照 QuestBatchStoreInterface 先例）：
+
+| 方法 | 说明 |
+|---|---|
+| `featureName(): string` | 能力名（小写短横线,如 'mmorpg' / 'quest'）——与 NYTHROS_FEATURES 白名单及 |
+
 #### `Nythros\Framework\Plugin\PluginInterface`
 插件契约：定义加载/启用/停用/卸载四态生命周期，由 PluginRegistry 驱动。
 
@@ -1343,11 +1362,14 @@ Redis 权威 + Stream 导出管线（PersistPipelineInterface 的第二实现，
 
 | 方法 | 说明 |
 |---|---|
+| `__construct(?Nythros\Framework\Plugin\FeatureFlags $featureFlags = NULL)` |  |
 | `all(): array` | 返回全部已加载插件（name => plugin）。 |
 | `disable(string $name): void` | 停用已加载插件（保留注册）。 |
 | `enable(string $name): void` | 启用已加载插件。 |
-| `get(string $name): ?Nythros\Framework\Plugin\PluginInterface` | 按名查询插件；未加载返回 null。 |
-| `load(Nythros\Framework\Plugin\PluginInterface $plugin, Nythros\Framework\Container\ContainerInterface $container, Nythros\Framework\Event\EventDispatcherInterface $dispatcher): void` | 加载插件：调用 $plugin->register 装配后登记进注册表；同名插件重复加载抛异常。 |
+| `get(string $name): ?Nythros\Framework\Plugin\PluginInterface` | 按名查询插件；未加载返回 null（被能力开关跳过的插件同样返回 null，用 skipped() 区分）。 |
+| `load(Nythros\Framework\Plugin\PluginInterface $plugin, Nythros\Framework\Container\ContainerInterface $container, Nythros\Framework\Event\EventDispatcherInterface $dispatcher): bool` | 加载插件：调用 $plugin->register 装配后登记进注册表；同名插件重复加载抛异常。 |
+| `setFeatureFlags(Nythros\Framework\Plugin\FeatureFlags $flags): void` | 注入能力开关表（fork 后/装配期覆盖惰性默认，幂等）。 |
+| `skipped(): array` | 因能力开关关闭被跳过的插件名名单（观测面：启动日志/诊断/make:game 能力报告消费）。 |
 | `uninstall(string $name, Nythros\Framework\Container\ContainerInterface $container, Nythros\Framework\Event\EventDispatcherInterface $dispatcher): void` | 卸载已加载插件：调 $plugin->uninstall 清理注册与订阅后从注册表摘除。 |
 
 ### `Nythros\Framework\Plugin\Buff`

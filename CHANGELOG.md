@@ -21,6 +21,14 @@
 
 ### Added
 
+- **能力开关：声明式条件装配（[框架/Plugin + 框架/Game]，路线图②「搭积木」地基）**：
+  `FeatureFlags`（三级优先：`NYTHROS_FEATURE_<NAME>` 覆盖 > `NYTHROS_FEATURES` 白名单 > 缺省全开=存量
+  零影响;解析只发生在 fromEnvironment 一处,类不读全局可测可注入）+ `FeaturePluginInterface`
+  （能力自声明,能力探测式照 QuestBatchStoreInterface 先例——未实现接口的既有/第三方插件不受约束）+
+  `PluginRegistry::load` 返回 bool：关闭的能力跳过装配（零 Container/dispatcher 足迹、`skipped()`
+  名单可观测、翻转开关重装清名单、不占名字防 squat）;MmorpgPlugin/HordePlugin 作示范实现（'mmorpg'/'horde',
+  与装配层既有 env 门叠加互不替代）;demo 两处调用点改为「load 返回值守 enable」防「跳过→enable 抛未加载」。
+  plugin-guide 新增 §2.3 用法与装配纪律。测试 +5（三级优先/环境解析/跳过零足迹/翻转重装/遗留插件免疫）。
 - **热路径可观测性与监听器故障隔离（[引擎/Event + 引擎/NetworkWorkerman]，平台目标「高可维护」的运行时地基）**：
   ① `SimpleEventBus` 派发隔离——publish/flush 逐监听器 try/catch,一个坏监听器不再吃掉同事件其余送达
   （flush 在帧末执行,修复前异常沿栈上抛会吞掉本帧剩余信封+打帧管线;与网络层「handler 崩溃不拖垮消息循环」

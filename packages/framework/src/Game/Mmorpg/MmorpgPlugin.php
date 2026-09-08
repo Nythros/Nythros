@@ -6,18 +6,23 @@ namespace Nythros\Framework\Game\Mmorpg;
 
 use Nythros\Framework\Container\ContainerInterface;
 use Nythros\Framework\Event\EventDispatcherInterface;
+use Nythros\Framework\Plugin\FeaturePluginInterface;
 use Nythros\Framework\Plugin\PluginInterface;
 
 /**
  * Mmorpg 插件（R4 类型模块试点，ADR-020 §4「命名空间 + PluginRegistry 插件形态」）：
  * 向 Container 注册 mmorpg 配置（'mmorpg.config'，缺省 MmorpgConfig::default()），供
  * 组装层解析后注入 MapServer——玩法参数归 framework，装配归组装层。
+ * 能力自声明（FeaturePluginInterface，name 'mmorpg'）：NYTHROS_FEATURES 白名单/
+ * NYTHROS_FEATURE_MMORPG=0 可将其关闭（load 跳过、不进 Container）。与装配层既有 env 门叠加，互不替代。
  * The mmorpg plugin (the R4 type-module pilot, ADR-020 §4's "namespace + PluginRegistry plugin form"):
  * registers the mmorpg config ('mmorpg.config', defaulting to MmorpgConfig::default()) into the Container for the
- * the assembly layer to resolve into MapServer — gameplay parameters live in the framework,
- * assembly in the assembly layer.
+ * assembly layer to resolve into MapServer — gameplay parameters live in the framework, assembly in the assembly
+ * layer. Self-declares feature 'mmorpg' (FeaturePluginInterface): a NYTHROS_FEATURES whitelist excluding it, or
+ * NYTHROS_FEATURE_MMORPG=0, skips its load (nothing enters the Container). Stacks with — does not replace — the
+ * assembly's existing env gate.
  */
-final class MmorpgPlugin implements PluginInterface
+final class MmorpgPlugin implements PluginInterface, FeaturePluginInterface
 {
     public const CONFIG_ID = 'mmorpg.config';
 
@@ -30,6 +35,11 @@ final class MmorpgPlugin implements PluginInterface
     }
 
     public function name(): string
+    {
+        return 'mmorpg';
+    }
+
+    public function featureName(): string
     {
         return 'mmorpg';
     }

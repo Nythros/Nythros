@@ -90,6 +90,26 @@ final class MmorpgPlugin implements PluginInterface
 **选型判断**：插件只是「给装配层递参数」→ 配置型；插件拥有可查询的能力（仓库/服务）→ 仓库型；
 两者可组合（Horde 插件注册配置，装配层解析后同时注入 RoomHub 与 MapServer）。
 
+### 2.3 能力开关：声明式条件装配（FeatureFlags）
+
+想「按游戏挑选能力块」，不必注释代码——插件多实现一个可选接口即声明自己的开关：
+
+```php
+final class MyPlugin implements PluginInterface, FeaturePluginInterface
+{
+    public function featureName(): string { return 'my-feature'; }   // 开关键
+}
+```
+
+`PluginRegistry` 装配时判定（三级优先）：`NYTHROS_FEATURES="quest,mail"`（白名单，未列即关）→
+`NYTHROS_FEATURE_MY_FEATURE=0/1`（单能力覆盖，压过白名单）→ 缺省全开（与接入前等价，存量零影响）。
+被关闭的插件：`load()` 返回 false、不进 Container、记入 `skipped()` 名单（能力报告/启动日志消费）；
+**未实现接口的既有与第三方插件不受约束**——渐进采纳、零破坏（能力探测式，照批量写回先例）。
+
+装配层纪律：`load()` 返回 false 时**不得**再调 `enable()`（会按「未加载」抛异常）——
+`if ($registry->load($p, $c, $d)) { $registry->enable($p->name()); }`；demo 的 horde/mmorpg 块即此形态
+（能力开关是 env 门之上的第二闸，两闸叠加互不替代）。
+
 ## 3. 事件订阅与退订（最容易踩的坑）
 
 PHP 闭包每次字面量求值都是**新实例**，`removeListener` 按引用精确匹配。所以：
