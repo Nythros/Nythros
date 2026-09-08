@@ -208,27 +208,74 @@ LUA;
             throw new \RuntimeException(sprintf('RedisServiceRegistry discover 失败: %s', (string) $redis->getLastError()));
         }
 
+        if ($entries === []) {
+            return [];
+        }
+
+        // 心跳存活预取合并：把「每实例一次 exists」的 N 次往返压成一次 pipeline（登录链每 auth 必经，
+        // N = 存活 map 实例数,是 1+N 串行链的主因）。pipeline 保序,结果与实例按 serviceId 对齐
+        // The heartbeat liveness pre-fetch collapses the per-instance exists (N round-trips) into one pipeline —
+        // this path is hit on every auth (the login chain), and N (live map instances) is the main driver of the
+        // 1+N serial chain. A pipeline preserves order, so results align to instances by serviceId.
+        $serviceIds = [];
+        foreach ($entries as $serviceId => $rawMeta) {
+            $serviceIds[] = (string) $serviceId;
+        }
+
+        $pipeline = $redis->multi(\Redis::PIPELINE);
+        foreach ($serviceIds as $serviceId) {
+            $pipeline->exists($this->hbKey($serviceType, $serviceId));
+        }
+        $aliveResults = $pipeline->exec();
+        if (!is_array($aliveResults)) {
+            throw new \RuntimeException(sprintf('RedisServiceRegistry discover 心跳预取失败: %s', (string) $redis->getLastError()));
+        }
+
         $instances = [];
+        $deadIds = [];
+        $malformedIds = [];
+        $index = 0;
         foreach ($entries as $serviceId => $rawMeta) {
             $serviceId = (string) $serviceId;
+            $alive = (int) ($aliveResults[$index] ?? 0) > 0;
+            $index++;
 
-            // 心跳键缺失 = 实例已死（kill -9 / 心跳停摆）：不可见 + 惰性回收
-            // Missing heartbeat key = dead instance (kill -9 / heartbeat stall): invisible + lazy reclamation
-            if (!$this->isAlive($redis, $serviceType, $serviceId)) {
-                $redis->hDel($this->svcKey($serviceType), $serviceId);
-                $redis->del($this->uidKey($serviceType, $serviceId));
+            // 心跳键缺失 = 实例已死（kill -9 / 心跳停摆）：不可见,回收延后统一批处理
+            // Missing heartbeat key = dead instance (kill -9 / heartbeat stall): invisible, reclamation deferred to a batch
+            if (!$alive) {
+                $deadIds[] = $serviceId;
                 continue;
             }
 
-            // meta 畸形（非 JSON 对象）：防御性忽略并回收（视为死数据，防畸形条目反复出现）
-            // Malformed meta (not a JSON object): defensively ignored and reclaimed (treated as dead data, preventing repeated hits)
+            // meta 畸形（非 JSON 对象）：防御性忽略并回收（视为死数据,防畸形条目反复出现）
+            // Malformed meta (not a JSON object): defensively ignored and reclaimed (treated as dead data)
             $meta = $this->decodeMeta($rawMeta);
             if ($meta === null) {
-                $redis->hDel($this->svcKey($serviceType), $serviceId);
+                $malformedIds[] = $serviceId;
                 continue;
             }
 
             $instances[$serviceId] = new ServiceInstance($serviceId, $meta);
+        }
+
+        // 惰性回收批处理：死实例 HDEL 服务 hash + DEL uid hash,畸形 meta 仅 HDEL 服务 hash——
+        // 合并为一条 pipeline,仅当确有回收对象时多付 1 次往返（正常路径 0 次,旧实现每死实例 2 次）。
+        // 回收语义与旧逐条实现逐字对齐：死实例删服务字段 + uid hash,畸形 meta 只删服务字段。
+        // Lazy reclamation batched: dead instances HDEL the service hash + DEL the uid hash, malformed meta only
+        // HDELs the service hash — merged into one pipeline, costing one extra round-trip only when there is
+        // something to reclaim (zero on the normal path, versus two per dead instance before). The reclamation
+        // semantics stay word-for-word aligned with the old per-instance implementation.
+        if ($deadIds !== [] || $malformedIds !== []) {
+            $cleanup = $redis->multi(\Redis::PIPELINE);
+            $svcKey = $this->svcKey($serviceType);
+            $reclaim = array_merge($deadIds, $malformedIds);
+            if ($reclaim !== []) {
+                $cleanup->hDel($svcKey, ...$reclaim);
+            }
+            foreach ($deadIds as $serviceId) {
+                $cleanup->del($this->uidKey($serviceType, $serviceId));
+            }
+            $cleanup->exec();
         }
 
         return $instances;
@@ -375,20 +422,6 @@ LUA;
         if ($redis->setex($this->hbKey($serviceType, $serviceId), self::HEARTBEAT_TTL, (string) ($this->clock)()) === false) {
             throw new \RuntimeException(sprintf('RedisServiceRegistry 心跳写入失败: %s', (string) $redis->getLastError()));
         }
-    }
-
-    /**
-     * 判断实例心跳键是否存在（存在即存活）。
-     * Whether the instance's heartbeat key exists (existing means alive).
-     *
-     * @param \Redis $redis 当前进程的 phpredis 连接 The phpredis connection of the current process.
-     * @param string $serviceType 服务类型 Service type.
-     * @param string $serviceId 实例标识 Instance identifier.
-     * @return bool true 存活 true when alive.
-     */
-    private function isAlive(\Redis $redis, string $serviceType, string $serviceId): bool
-    {
-        return $redis->exists($this->hbKey($serviceType, $serviceId)) > 0;
     }
 
     /**
