@@ -223,7 +223,10 @@ sequenceDiagram
 - 文档分级（ADR-018 决策 3）：Quick Start（门禁必需）→ Architecture / Actor Guide / Cell Guide（本组四篇）→ Protocol / Security / Cluster / Framework Guide（渐进）。
 - ✅ 发布流水线已落地：v* tag → subsplit 三镜像仓（engine/framework/skeleton）→ Packagist → GitHub Release + npm（`.github/workflows/release.yml`）。
 - Cluster 能力（跨进程/跨服务器）明确后置：演进顺序 单进程 → 多 Actor → 多地图 → 多进程 → 跨进程 → 跨服务器。
-- **社交角色横扩的已知边界**（做 `gateway/chat/team count>1` 前必读）：三角色的连接表/分组归属为
-  **进程内**语义——多实例下「单点登录踢旧、joinGroup 群发、team:invite 定向」只在持连接的实例内可见。
-  横扩前需先落地跨进程 presence 层（uid→实例路由 + 群消息扇出）并把 ThrottledAuthenticator 计数外置
-  （Redis）；当前登录洪峰优先用零扩进程手段解（bcrypt cost 下调，见 security.md §2 三级旋钮）。
+- **社交扩展的正解 = 按消息职能竖切，不是同角色横扩**（评审结论，取代早期 presence 专项草案）：
+  三角色（gateway/chat/team）本就是"按职能分进程"的形态，沿同一维度继续切即可——当世界频道的高频
+  扇出实测拖慢 chat（判据：`network.dispatch_ms` p99 因世界消息越桶，perf-stats/stress-hotzone 可测），
+  新增 `broadcast` 角色专吃世界/频道广播，**按 mapId 静态分片**：一个世界的玩家进出同一分片进程，
+  天然无跨实例扇出——跨进程 presence 层（uid→实例路由 + 群消息总线）**因此整个不需要**。
+  登录侧保持单 gateway（bcrypt cost 9 ≈45/s 单实例够用，见 security.md §2 三级旋钮），从源头消除
+  "同一 uid 散落多实例"的踢旧问题。多实例横扩 + presence 仅在全服级频道成为产品需求时才重新立项。
