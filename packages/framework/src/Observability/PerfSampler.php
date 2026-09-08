@@ -34,7 +34,7 @@ final class PerfSampler
      * Creates the sampler.
      *
      * @param PerfSnapshotProviderInterface $probe 性能快照供给者（组装层绑定具体探针） Performance snapshot provider (the assembly layer binds the concrete probe).
-     * @param \Closure(): \Redis $redisFactory Redis 连接工厂（fork 后 lazy 建连） Redis connection factory (lazily connected after fork).
+     * @param \Closure(): \Redis $redisFactory Redis 连接工厂（fork 后 lazy 建连，首采样建连一次后复用） Redis connection factory (lazily connected once on first sample, then reused).
      * @param string $serviceId 实例标识（如 map-1#ch-1） Instance id (e.g. map-1#ch-1).
      * @param int $sampleSeconds 采样间隔（秒） Sampling interval in seconds.
      */
@@ -45,6 +45,14 @@ final class PerfSampler
         private readonly int $sampleSeconds = 5,
     ) {
     }
+
+    /**
+     * @var \Redis|null 记忆化连接（照 RedisFriendStore/AuctionStore 先例:工厂产物本进程复用）。
+     *                  不设属性类型以兼容测试 Fake 注入(工厂签名 \Closure(): \Redis 为 phpstan 口径)。
+     * Memoized connection (the RedisFriendStore/AuctionStore precedent: the factory result is reused per process).
+     * Untyped on purpose so test fakes can be injected (the \Closure(): \Redis factory signature is the phpstan contract).
+     */
+    private $client = null;
 
     /** 执行一次采样：读探针快照 → 写 Redis。 Runs one sample: collect the probe snapshot → write Redis. */
     public function sample(): void
@@ -57,7 +65,12 @@ final class PerfSampler
         }
 
         try {
-            $redis = ($this->redisFactory)();
+            // 旧行为：每 5s 经工厂新建连接（connect+auth+select ≈3 RTT + 连接churn）——与全部 store 的
+            // 记忆化模式不一致；现照先例缓存,失败时丢弃连接令下一轮重建（保持原「每轮新建」的自愈性）
+            // Previously every sample opened a fresh connection (connect+auth+select ≈3 RTTs plus churn),
+            // inconsistent with every store's memoization; the cached client is dropped on failure so the next
+            // round reconnects (preserving the self-healing the old per-sample connect implicitly had)
+            $redis = $this->client ??= ($this->redisFactory)();
 
             $pipeline = $redis->multi(\Redis::PIPELINE);
 
@@ -92,8 +105,10 @@ final class PerfSampler
 
             $pipeline->exec();
         } catch (\Throwable $e) {
-            // 采样失败只记日志，绝不抛给上游（探针不能拖垮游戏主循环）
-            // Sampling failures are logged only and never thrown upstream (probes must never stall the game loop)
+            // 采样失败只记日志，绝不抛给上游（探针不能拖垮游戏主循环）；并丢弃缓存连接令下一轮重连
+            // Sampling failures are logged only and never thrown upstream (probes must never stall the game
+            // loop); the cached connection is dropped so the next round reconnects
+            $this->client = null;
             error_log(sprintf('[PerfSampler] sample failed: %s', $e->getMessage()));
         }
     }

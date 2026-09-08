@@ -60,6 +60,50 @@ final class PerfSamplerTest extends TestCase
         self::assertTrue($redis->execCalled);
     }
 
+    public function testConnectionIsMemoizedAcrossSamples(): void
+    {
+        // 记忆化契约（P1-D 修复）：多次非空采样复用同一连接——工厂只建连一次,
+        // 消除旧实现每采样 connect+auth+select 的连接 churn（与全部 store 的记忆化模式对齐）
+        // The memoization contract (the P1-D fix): repeated non-empty samples reuse one connection (the factory
+        // connects once), killing the old per-sample connect+auth+select churn — aligned with every store's memoization
+        $probe = new FakeProbe();
+        $probe->queue = ['counters' => ['e' => 1], 'histograms' => [], 'totals' => []];
+        $factoryCalls = 0;
+        $redis = new FakeRedis();
+        $sampler = new PerfSampler($probe, function () use (&$factoryCalls, $redis): FakeRedis {
+            ++$factoryCalls;
+
+            return $redis;
+        }, 'map-1#ch-1');
+
+        $sampler->sample();
+        $sampler->sample();
+
+        self::assertSame(1, $factoryCalls, '工厂只建连一次,第二采样复用缓存连接');
+        self::assertCount(2, $redis->ops, '两采样各写各的 pipeline（复用连接≠合并轮次）');
+        self::assertCount(2, $redis->sets);
+    }
+
+    public function testFailedSampleDropsConnectionForReconnect(): void
+    {
+        // 失败自愈契约：建连抛错不得被缓存（下一轮重建）——记忆化不牺牲旧「每轮新建」的自愈性
+        // The self-healing contract: a connect failure is never cached (the next round reconnects) — memoization
+        // must not trade away the self-healing the per-sample connect implicitly had
+        $probe = new FakeProbe();
+        $probe->queue = ['counters' => ['e' => 1], 'histograms' => [], 'totals' => []];
+        $factoryCalls = 0;
+        $sampler = new PerfSampler($probe, function () use (&$factoryCalls): \Redis {
+            ++$factoryCalls;
+
+            throw new \RuntimeException('connection refused');
+        }, 'map-1#ch-1');
+
+        $sampler->sample();
+        $sampler->sample();
+
+        self::assertSame(2, $factoryCalls, '每轮失败后下一轮都重试建连（坏连接不缓存）');
+    }
+
     public function testRedisFailureIsSwallowed(): void
     {
         $probe = new FakeProbe();
