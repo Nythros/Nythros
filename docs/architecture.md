@@ -223,3 +223,7 @@ sequenceDiagram
 - 文档分级（ADR-018 决策 3）：Quick Start（门禁必需）→ Architecture / Actor Guide / Cell Guide（本组四篇）→ Protocol / Security / Cluster / Framework Guide（渐进）。
 - ✅ 发布流水线已落地：v* tag → subsplit 三镜像仓（engine/framework/skeleton）→ Packagist → GitHub Release + npm（`.github/workflows/release.yml`）。
 - Cluster 能力（跨进程/跨服务器）明确后置：演进顺序 单进程 → 多 Actor → 多地图 → 多进程 → 跨进程 → 跨服务器。
+- **社交角色横扩的已知边界**（做 `gateway/chat/team count>1` 前必读）：三角色的连接表/分组归属为
+  **进程内**语义——多实例下「单点登录踢旧、joinGroup 群发、team:invite 定向」只在持连接的实例内可见。
+  横扩前需先落地跨进程 presence 层（uid→实例路由 + 群消息扇出）并把 ThrottledAuthenticator 计数外置
+  （Redis）；当前登录洪峰优先用零扩进程手段解（bcrypt cost 下调，见 security.md §2 三级旋钮）。

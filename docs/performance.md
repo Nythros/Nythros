@@ -43,6 +43,8 @@
 | \`eventbus.batch\` / \`eventbus.envelopes_dispatched\` | SimpleEventBus::flush() | 单批分发数与总量 |
 | \`eventbus.dropped_total\` | SimpleEventBus::flush() | 队列拥塞丢弃（可靠事件不丢；droppable 丢弃计数） |
 | \`network.out_bytes\` / \`out_packets\` / \`batch_packets\` | WorkermanConnection::sendBatch | 出站字节/包/批量包大小分布 |
+| \`network.dispatch_ms\` / \`network.inbound_messages\` | WorkermanWebSocketServer::handleMessage（finally 口径,异常路径同入桶） | 消息派发链耗时直方图 + 入站计数——「哪类消息吃了帧预算」的归因入口（审计 P0-A 类回归现形网） |
+| \`eventbus.listener_error_total\` | SimpleEventBus::publish/flush | 监听器故障隔离计数（一个坏监听器不吞其余送达;事件名进日志不进键,防基数爆炸） |
 
 ### 3.2 采样器（\`packages/framework/src/Observability/PerfSampler.php\`）
 
@@ -163,8 +165,10 @@ php benchmarks/soak-map.php --self-test
 
 ### 7.2 故障矩阵：`php benchmarks/fault-drill.php`
 
-三场景「注入 → 行为断言 → 恢复 → 自愈断言」：**redis-down**（worker 存活/新登录被拒/免重启自愈）、
-**mysql-down**（主链路无感/恢复自愈）、**kill9**（worker 被 kill -9 后 master 重生）。Redis/MySQL
+四场景「注入 → 行为断言 → 恢复 → 自愈断言」：**redis-down**（worker 存活/新登录被拒/免重启自愈）、
+**mysql-down**（主链路无感/恢复自愈）、**kill9**（worker 被 kill -9 后 master 重生）、
+**exporter**（导出进程 kill 后登录不受影响 + backlog 心跳停更可观测 + 重启续消费——Workerman
+proctitle 双形态全树杀防「只杀 worker 被 master 重生」假绿）。Redis/MySQL
 的控制命令可用 `--redis-stop/--redis-start/--mysql-stop/--mysql-start` 覆盖（MySQL 注入需要 root）。
 已知边界：网络分区无法单机演练（需 tc/netem 或多机）。自检：`--self-test`。
 
@@ -174,3 +178,23 @@ php benchmarks/soak-map.php --self-test
 - **心跳 meta 不完整**：Redis 数据丢失（无持久化重启）后，仅 playerCount 的心跳合并产出缺
   mapId/wsAddress 的残缺 meta，`selectChannel` 永久拒绝该频道——心跳现携带完整注册 meta，
   首个心跳（≤5s）即可无损重建注册条目。
+
+## 8. 平台量化验收矩阵（「高负载/高性能/高可靠」的可回归承诺）
+
+定标原则：每格要么有**实测记录**（标注来源），要么有**可复跑命令**；不写拍脑袋数字。基线劣化统一由
+`tools/bench-gate.php` 监听（阈值 20%，高方差指标只存档不入监听集）。
+
+| 维度 | 指标 | 验收标准 | 验证手段/来源 |
+|---|---|---|---|
+| 帧成本 | `world.frame_ms` P99 | < 5ms @ 1000 实体 AOI 世界（实测 0.04ms/帧 ×50Hz 预算） | `php benchmarks/engine-bench.php --json` + bench-gate |
+| 帧漂移 | 24h 全负载后半段斜率 | ≈0（实测 +0.00016ms/波 平台化） | `soak-map.php --play`（blueprint/34） |
+| 热路径 IO | tick 文件 IO 客户端引用 | =0（静态）；`listener_error_total` 增速 ≈0（运行期） | `composer io-free` + Prometheus |
+| 消息归因 | `network.dispatch_ms` 各桶 | 任何消息类型不越 32ms 桶（越界即现形定位） | perf-stats §3.2 键族 |
+| 登录吞吐 | 单 gateway 进程 | ≥45/s（cost 9 = 22.3ms 实测 WSL；调 cost 8 ≈93/s） | security.md §2 三级旋钮 |
+| 房间容量 | 30Hz × 6 人 + spawn/AoE | 15 房无顺延（RSS ≈37MB 恒定）；上限以 30/60 房复测标定 | `stress-rooms`（§6.2/§6.4） |
+| 热区扇出 | 60 人聚格带宽/客户端 | < 4KB/s（密度降档把 O(N²) 压平） | `stress-hotzone`（§6.1） |
+| 导出延迟 | `nythros_perf_gauge{service="storage-exporter",metric="backlog"}` | < 5000 持续 5min 告警；Stream MAXLEN 100k 双保险丝 | Prometheus + fault-drill exporter 场景 |
+| 长跑稳定 | RSS 斜率 / dropped / auth | 0.000 / 0 / 100%（24h 实测 1416 波全过） | `soak-map` + 每小时巡检脚本 |
+| 容错 | 故障矩阵四场景 | `RESULT: PASS`（redis/mysql/kill9/exporter） | `php benchmarks/fault-drill.php` |
+
+> 目标硬件复测纪律：以上阈值为 WSL2 开发机实测；生产按 §6.4 硬件选型在 staging 重跑一遍再签字。

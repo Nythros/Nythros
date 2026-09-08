@@ -21,6 +21,13 @@
 
 ### Added
 
+- **平台量化验收矩阵 + 社交横扩边界声明（[文档,路线图⑥+④],「高负载」从形容词变承诺）**：
+  performance.md 新增 §8——每格「实测记录或可复跑命令」二选一(帧 P99<5ms@1000 实体、24h RSS 斜率 0、
+  dispatch_ms 32ms 越界即现形、登录 ≥45/s@cost9、15 房 30Hz 无顺延、backlog<5000 告警、四场景故障矩阵
+  PASS…),统一劣化阈值走 bench-gate(20%);探针表补 network.dispatch_ms/inbound_messages 与
+  eventbus.listener_error_total;§7.2 故障矩阵更新四场景。architecture.md §6 显式化社交角色横扩边界
+  (连接表进程内语义→presence 层为前置条件;登录洪峰当前解=security §2 三级旋钮)——路线图④以
+  「边界成文」交付,不做半吊子多实例(静默破单点登录/群路由比不支持更糟)。
 - **能力报告:make:capabilities（[框架/Capability + 框架/Make]，路线图⑤「开箱即用」的导航面）**：
   `CapabilityCatalog` 能力目录单一事实源（18 项能力块:key=开关名,标注 所属模块/装配 env 门/入口类）;
   `make:capabilities [--format=text|json]` 一站输出「全部能力 × FeatureFlags 当前判定 × env 门」——
