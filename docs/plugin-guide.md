@@ -212,7 +212,9 @@ $pluginRegistry->enable('announcer');
 
 ## 5. make 脚手架
 
-`php vendor/bin/make` 提供骨架生成（当前 `make:actor` 一族）：
+`php vendor/bin/make` 提供骨架生成（`make:actor` / `make:skill` / `make:event` / `make:map`），
+外加**能力报告** `make:capabilities [--format=json]`——列出框架全部可装配能力块与当前环境的开关判定
+（数据源 `CapabilityCatalog` + `FeatureFlags`，与运行时装配同源不漂移；见 §2.3）。
 
 ```bash
 php vendor/bin/make make:actor BossActor --kind=monster --ns=Nythros\\Demo\\Game --out=packages/demo/src/Game

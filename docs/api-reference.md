@@ -5,7 +5,7 @@
 > 未标 `@internal` 的类/枚举（ADR-023/024）。`@internal` 实现类不构成 API 承诺，业务层只依赖 Contracts 接口。
 > 指南（用法与教程）见 [docs/ 索引](https://github.com/nythros/nythros/tree/master#文档索引)；本文件只做「有什么、叫什么、签名单什么」的索引。
 > 摘要中的 P 编号（P9/P11/P15…）是阶段验收记录的追溯锚点，对应 [blueprint/](https://github.com/nythros/nythros/tree/master/blueprint) 目录的编号验收文档。
-171 个公开符号（engine + framework）。
+173 个公开符号（engine + framework）。
 
 
 ## nythros/engine
@@ -582,6 +582,16 @@ NPC 基类：静态实体，无主动行为；交互由玩家触发 onInteract�
 |---|---|
 | `__construct(Nythros\Security\AuthenticatorInterface $inner, int $maxAttempts = 5, int $lockoutSeconds = 60, ?Closure $clock = NULL)` | 构造防爆破装饰器。 |
 | `authenticate(array $credentials): Nythros\Security\IdentityInterface` |  |
+
+### `Nythros\Framework\Capability`
+
+#### `CapabilityCatalog`
+能力目录（单一事实源）：框架对「可挑选的能力块」的集中声明——名称、说明、装配入口（env 门/插件类
+
+| 方法 | 说明 |
+|---|---|
+| `static` `all(): array` | 能力清单（只读静态目录;新能力块接入框架时必须在此登记,CI 测试锁 key 唯一性）。 |
+| `static` `get(string $capability): ?array` | 单个能力的条目查询;未登记返回 null。 |
 
 ### `Nythros\Framework\Cluster`
 
@@ -1232,6 +1242,13 @@ make:actor — 生成业务 Actor 骨架（kind → 基类 + 钩子集映射驱�
 | 方法 | 说明 |
 |---|---|
 | `run(array $args): string` | 执行 make:actor：校验参数 → 渲染 kind 对应模板 → 写入 --out/{类名}.php。 |
+
+#### `MakeCapabilities`
+make:capabilities —— 能力报告：列出框架全部可装配能力块,标注每一项在当前环境的开关判定 · extends `Nythros\Framework\Make\MakeCommand`
+
+| 方法 | 说明 |
+|---|---|
+| `run(array $args): int` | 生成能力报告并打印。返回进程退出码（恒 0;纯查询,不改文件）。 |
 
 #### `MakeCommand`
 make:* 命令公共基类：位置参数 + --key=value 选项解析、模板读取、目标写入。 · abstract

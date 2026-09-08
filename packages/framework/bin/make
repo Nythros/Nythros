@@ -4,13 +4,14 @@
 declare(strict_types=1);
 
 // 定位：packages/framework/bin/make — 脚手架 CLI 入口（vendor/bin/make 软链到本文件）。
-// 手写 argv 解析（不引入 symfony/console，铁律 8），分发到 Make\MakeActor / MakeSkill / MakeEvent / MakeMap。
+// 手写 argv 解析（不引入 symfony/console，铁律 8），分发到 Make\MakeActor / MakeSkill / MakeEvent / MakeMap / MakeCapabilities。
 // Located at: packages/framework/bin/make — the scaffold CLI entry (vendor/bin/make symlinks here).
-// Hand-written argv parsing (no symfony/console, iron rule 8) that dispatches to Make\MakeActor / MakeSkill / MakeEvent / MakeMap.
+// Hand-written argv parsing (no symfony/console, iron rule 8) that dispatches to Make\MakeActor / MakeSkill / MakeEvent / MakeMap / MakeCapabilities.
 
 require __DIR__ . '/../../../vendor/autoload.php';
 
 use Nythros\Framework\Make\MakeActor;
+use Nythros\Framework\Make\MakeCapabilities;
 use Nythros\Framework\Make\MakeEvent;
 use Nythros\Framework\Make\MakeMap;
 use Nythros\Framework\Make\MakeSkill;
@@ -27,6 +28,8 @@ const USAGE = <<<'TXT'
   php vendor/bin/make make:skill Fireball --out=packages/demo/config/skills.php
   php vendor/bin/make make:event PlayerKilled --out=packages/demo/src/Game
   php vendor/bin/make make:map Forest --out=packages/demo/config/maps.php
+  php vendor/bin/make make:capabilities            # 能力报告：全部能力块 × 当前开关判定
+  php vendor/bin/make make:capabilities --format=json
 
 TXT;
 $command = $argv[1] ?? null;
@@ -36,6 +39,12 @@ if ($command === null) {
 }
 
 $args = array_slice($argv, 2);
+
+// make:capabilities 是纯查询(自带输出与退出码),与「生成文件」族分开短路
+// make:capabilities is a pure query (own output/exit code), short-circuited apart from the file-generating family
+if ($command === 'make:capabilities') {
+    exit((new MakeCapabilities())->run($args));
+}
 
 try {
     $target = match ($command) {

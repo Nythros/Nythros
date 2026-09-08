@@ -21,6 +21,12 @@
 
 ### Added
 
+- **能力报告:make:capabilities（[框架/Capability + 框架/Make]，路线图⑤「开箱即用」的导航面）**：
+  `CapabilityCatalog` 能力目录单一事实源（18 项能力块:key=开关名,标注 所属模块/装配 env 门/入口类）;
+  `make:capabilities [--format=text|json]` 一站输出「全部能力 × FeatureFlags 当前判定 × env 门」——
+  开发者按目标游戏挑积木从「翻文档猜开关」变成「跑一条命令看清单」;JSON 形态供工具/CI 消费。
+  CI 锁测试 4 例:entry 类可加载（防重构漂移）、FeaturePluginInterface 声明必须登记目录（开关体系与
+  报告不漂移）、双格式渲染稳定、白名单判定透传。README/文档的「框架提供什么能力」自此可由命令现场生成。
 - **会话状态统一生命周期（[框架/Persistence + 框架/Quest + demo/装配]，路线图③「搭积木」会话地基）**：
   `SessionParticipantInterface`（onSessionOpen/onSessionClose 幂等契约:open=attach 读路径预热（每连接
   同步点允许批量读）、close=detach 回写+释放（失败留脏不丢））;QuestService 实现之（委托既有
