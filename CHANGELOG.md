@@ -21,6 +21,20 @@
 
 ### Added
 
+- **出站链回归测试网 + 热路径微优化实验（[框架/Server + 引擎/Kernel + 探针]，「实测说话」流程第二轮）**：
+  FrameMergerTest 新增 3 例钉住 drain 边界语义——全 LOW 连接在软过滤下整条缺席、超配额且全 LOW 本帧不发、
+  多连接独立成包键序稳定（正是本轮重构触碰的分支）。两项同机 A/B 通过的优化见下方 Performance。
+  探针 `benchmarks/probe-fm-perf-ab.php` 可复跑：drain 四场景（无过滤/软过滤/超配额重编码/整条跳过）
+  逐字节对拍 + bucketOf 穷举值域对拍（NaN/负值/±0/边界/INF）。
+- **GridAOI 回归测试网 + AOI 优化实验裁决（[引擎/AOI + 文档]，「AOI 优化」方向收口为实测否决）**：
+  GridAOITest 新增 4 例——同格微移 fast path 与 queryShape 精判读实时位置、邻格/对角/大跨度传送差分、
+  负坐标与远离原点规模、remove 后同 id 重登记重算 entered（测试类数不变,engine 43 类口径不变）。
+  两项候选优化经同机 A/B 后**否决回退**并固化为红线（best-practices §4）：① SoA 坐标列 + 邻格带边
+  差分——带边双扫退化 + 列刷新破坏 fast path 零写优势,本机 updateEntity 实测回退 2.6×;② 整数打包
+  格子键 `(cx+SHIFT)*STRIDE+(cy+SHIFT)`——query 无稳定收益（WSL A/B 中位数持平）,且整数打包算术在
+  `opcache.jit=tracing`（WSL 开发环境缺省配置）下触发 PHP 8.3.33 tracing JIT miscompile——GridAOI
+  28 回归 9 红、`jit=off` 全绿,字符串键原实现同环境 1296 全绿;常驻进程必然热编译,风险不可接受。
+  performance.md §8 验收矩阵新增「JIT 兼容」行（复跑命令口径）,防止该方向被再次引入。
 - **平台量化验收矩阵 + 社交横扩边界声明（[文档,路线图⑥+④],「高负载」从形容词变承诺）**：
   performance.md 新增 §8——每格「实测记录或可复跑命令」二选一(帧 P99<5ms@1000 实体、24h RSS 斜率 0、
   dispatch_ms 32ms 越界即现形、登录 ≥45/s@cost9、15 房 30Hz 无顺延、backlog<5000 告警、四场景故障矩阵
@@ -144,8 +158,38 @@
   npm（条件跳过）；monorepo 内部依赖 `@dev`→`^0.1`（path repo `options.versions` 注入 `0.1.x-dev`
   保开发期解析，拆分仓纯 tag 定版）；`composer require nythros/engine` 待人工建拆分仓+注册后可用。
 
+### Performance
+
+- **FrameMerger::drain 出站每连接省一遍全帧复制（+10% 端到端，双 JIT 一致）**：① 无软过滤（常态）时
+  `$chosen` 经 PHP 数组 COW 直接共享帧槽列表，免逐槽 append 重建；② `$encode` 闭包提升为私有方法
+  `encodeSlots`（原每连接每帧分配一次闭包）；③ `array_map`+`array_values` 双中间数组改 foreach 直建
+  Message 列表（列表上 array_values 本为冗余拷贝）。输出逐字节一致（探针 4 场景对拍 + 既有 7 测 +
+  新 3 测），drain(8 槽) 0.0114→0.0103 ms/op（JIT ON）/ 0.0153→0.0139（JIT OFF）。
+- **PerfProbe::bucketOf 升序比较链 + is_nan 显式守卫（热分布 3~5×）**：原 foreach 无提前退出、每次全扫
+  9 边界。分布实测：帧耗时/派发耗时强右偏（P50=0.264/P90=0.475，~90% 落桶 0）——**升序**让热值 1-2 次
+  比较即出（平均 1.7 次），首版曾选**降序**（对热值平均 8.3 次，恰为最坏）经分布分析后纠正；**二分被实测
+  否决**——9 桶规模下 while 循环 + 数组取界的常数开销使其在偏态与均匀分布下都慢于升序（探针
+  `benchmarks/probe-bucket-ab.php` 三分布 × 交替中位）。**新发现并入档**：`!($ms >= 0.5)` 取反守卫在
+  PHP 8.3.33 tracing JIT 下对 NaN 实测误编译（冷对拍通过、返回 8），`is_nan()` 显式守卫无此问题——
+  生产实现用 is_nan 头部守卫并在注释禁止取反写法；新增 `PerfProbeTest` 2 例（全域边界 18 值冷对拍 +
+  5 万次压热后热态复验，Kernel 测 ×3 连跑 WSL JIT 全绿）。绝对量仍属微优化（每帧+每入站消息各一次），
+  价值在方向正确与 JIT 陷阱固化成测试。
+- 本轮**未发现新缺陷**；上轮 LIST 静默补 null 的同型模式（`?? "\x00"` 兜底读字节）全 Protocol
+  目录扫描仅此一处。其余解码器结构审查均严格：Msgpack 每次读字节前 `need()` 验长、
+  Protobuf 主循环 `offset < end` 收口且 varint 带显式截断异常、JsonBatch 依赖 json_decode
+  原生报错——静默补 null 类缺陷在协议层已闭环。
+
 ### Fixed
 
+- **BinaryBatchSerializer 截断包静默 null 填充（协议严格性缺陷 + 热路径提速）**：LIST 元素字节被裁掉时，
+  旧实现经 `?? "\x00"` 把缺失元素类型字节读成 T_NULL——截断包「成功解码」出 null 填充的列表（cut=1/2/11/20/24/27
+  实抓，payload 出现线上根本不存在的 null），违反 protocol.md §5 与类头「严格」声明。LIST 元素读取先验长再读；
+  decodeBatch 增加帧长首道闸（声明长度超出缓冲 → `帧体越界` DecodeException，fail-fast）。回归 2 例
+  （逐档截断必抛 × 20、伪造超长帧）+ 探针 40 档异常对拍（benchmarks/probe-protocol-ab.php）。
+  同轮 A/B 落地两项已验证热路径优化：编码定长字段单次 pack（nCq/nCd/nCnn/nCC/nCN 替代双 pack+拼接）、
+  解码标量读改 unpack 三参/ord 位运算（免 substr 中间串）——探针同机对拍 encode +27~46%、decode +36~47%
+  （JIT 开/关双配置一致、字节/值/异常三重对拍通过），engine-bench 监听项 binary_batch_decode 相对
+  提交基线 +2.7×、encode +1.7×。协议线教训反向验证：本轮改动经 WSL tracing-JIT 下 249 协议测 ×3 全绿复验。
 - **soak 编排器健壮性**：时间线 fopen 改 fail-fast（先于托管栈打开）、失联/熔断一律 break 而非
   exit——php fatal 与 exit 不执行 finally，会以孤儿服务形态泄漏托管栈（启动器以普通用户跑
   root 属主目录实抓）。
