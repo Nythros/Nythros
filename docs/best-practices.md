@@ -63,6 +63,10 @@ Nythros 的并发模型是 **Actor 单线程假设**：同一 Actor 的 `update(
   缺省装配）在批量开服场景会排队，不是 bug——调大前先读 performance.md §6.3。
 - **基准回归**：改了 World/AOI/协议热路径，跑 `php benchmarks/engine-bench.php --json` 对比基线
   （门禁阈值 CI 50%、本地 20%，见 testing-guide §4）。
+- **GridAOI 格子键勿换整数打包**（实测否决的优化方向，勿再尝试）：`"cx:cy"` 字符串键在 PHP 8.3 无稳定性能
+  劣势（WSL 同机 A/B query 持平），而整数打包算术在 `opcache.jit=tracing`（WSL 开发环境缺省）下触发
+  tracing JIT miscompile——28 个 GridAOI 回归 9 红、`jit=off` 全绿；常驻进程必然热编译，属 P0 风险。
+  GridAOITest/AoiCorrectnessTest 与 performance.md §8 JIT 兼容行是这条红线的现形网。
 
 ## 5. 配置与数值
 

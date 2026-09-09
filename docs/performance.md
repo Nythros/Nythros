@@ -187,6 +187,7 @@ proctitle 双形态全树杀防「只杀 worker 被 master 重生」假绿）。
 | 维度 | 指标 | 验收标准 | 验证手段/来源 |
 |---|---|---|---|
 | 帧成本 | `world.frame_ms` P99 | < 5ms @ 1000 实体 AOI 世界（实测 0.04ms/帧 ×50Hz 预算） | `php benchmarks/engine-bench.php --json` + bench-gate |
+| JIT 兼容 | 引擎热函数在 tracing JIT 下行为 | WSL 开发环境（`opcache.jit=tracing`）下 engine 全测试类全绿——长跑常驻进程必然触发热编译，miscompile 属 P0 | `php vendor/bin/phpunit packages/engine/tests/Aoi packages/engine/tests/World`（缺省 ini） |
 | 帧漂移 | 24h 全负载后半段斜率 | ≈0（实测 +0.00016ms/波 平台化） | `soak-map.php --play`（blueprint/34） |
 | 热路径 IO | tick 文件 IO 客户端引用 | =0（静态）；`listener_error_total` 增速 ≈0（运行期） | `composer io-free` + Prometheus |
 | 消息归因 | `network.dispatch_ms` 各桶 | 任何消息类型不越 32ms 桶（越界即现形定位） | perf-stats §3.2 键族 |

@@ -49,6 +49,10 @@ final class GridAOI implements AOIProviderInterface
 - **格子索引** `$cells`：`"cx:cy"` → 格子内以实体 id 为键的实体表。格子坐标由 `floor(x / cellSize)` / `floor(y / cellSize)` 得到（负坐标同样朝 -∞ 取整，格子边界在原点两侧一致）。
 - **反查索引** `$entityCells`：实体 id → 所在格子 key，使移除与更新免于全表扫描。
 - `query()` 返回九宫格（当前格 + 周围 8 格，`cx-1..cx+1` × `cy-1..cy+1`）内全部实体，**含自身**，按实体 id 去重。
+- **格子键为何是字符串而不是整数打包**：同机 A/B 实测（WSL，engine-bench）整数打包键对 query 无稳定收益，
+  而打包算术在 `opcache.jit=tracing` 下触发 PHP 8.3.33 tracing JIT miscompile（GridAOI 回归 9 红，
+  `jit=off` 全绿）——字符串键原实现在同一 JIT 配置下全量全绿。红线见 [best-practices §4](best-practices.md)，
+  现形网为 GridAOITest/AoiCorrectnessTest 与 performance.md §8「JIT 兼容」行。
 
 ### 2.2 updateEntity：登记与视野差分
 

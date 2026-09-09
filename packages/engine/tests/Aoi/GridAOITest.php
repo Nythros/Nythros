@@ -174,6 +174,103 @@ final class GridAOITest extends TestCase
     }
 
     /**
+     * 同格微移走 fast path：空差分、零登记刷新，但 queryShape 的 contains 精判读实体实时位置，视野结果不受陈旧影响。
+     * Same-cell micro-moves take the fast path (empty delta, zero registration writes), yet queryShape's contains
+     * precision reads the entity's live position, so results never suffer from stale state.
+     */
+    public function testSameCellMoveKeepsFastPathAndQueryShapePrecision(): void
+    {
+        $aoi = new GridAOI(10);
+        $a = new BaseEntity('a', new Position(1, 1));
+        $aoi->updateEntity($a);
+
+        $a->move(8, 8); // 仍在 0:0 still in cell 0:0
+        self::assertSame([], $aoi->updateEntity($a)['entered']);
+
+        // 新位置 (9,9) 落入圆心 (9,9) 半径 2 的圆：fast path 虽跳过登记，精判读实时位置，结果仍含 a
+        // New position (9,9) is inside a circle at (9,9) r=2; despite the skipped registration, precision reads live coords
+        self::assertSame(['a'], $this->ids($aoi->queryShape(new CircleShape(9, 9, 2))));
+    }
+
+    /**
+     * 邻格迁移（含对角）与大跨度传送的 entered/left 差分：对角移动保持邻居、单轴移出、传送脱离全部旧邻居。
+     * Deltas for adjacent moves (diagonal included) and far teleports: a diagonal move keeps both neighbors,
+     * a single-axis move drops the one outside the new 3x3, and a teleport leaves all old neighbors.
+     */
+    public function testAdjacentAndTeleportMoveDeltas(): void
+    {
+        $aoi = new GridAOI(10);
+        $m = new BaseEntity('m', new Position(5, 5)); // 0:0
+        $f = new BaseEntity('f', new Position(15, 15)); // 1:1 对角格 diagonal cell
+        $c = new BaseEntity('c', new Position(5, 15)); // 0:1
+        $aoi->updateEntity($f);
+        $aoi->updateEntity($c);
+        $aoi->updateEntity($m);
+
+        $m->move(10, 10); // → 1:1：f、c 仍在新九宫格内 → 空差分 f and c both remain inside the new 3x3 → empty delta
+        $delta = $aoi->updateEntity($m);
+        self::assertSame([], $this->ids($delta['entered']));
+        self::assertSame([], $this->ids($delta['left']));
+
+        $m->move(10, 0); // → 2:1：c（0:1）脱离新九宫格 → left=[c] c falls out of the new 3x3 → left=[c]
+        $delta = $aoi->updateEntity($m);
+        self::assertSame([], $this->ids($delta['entered']));
+        self::assertSame(['c'], $this->ids($delta['left']));
+
+        $m->move(50, -50); // → 7:-4 大跨度传送：f 脱离，无进入 large teleport: f leaves, nothing enters
+        $delta = $aoi->updateEntity($m);
+        self::assertSame([], $this->ids($delta['entered']));
+        self::assertSame(['f'], $this->ids($delta['left']));
+    }
+
+    /**
+     * 格子索引的符号处理：负坐标格子与远离原点的正坐标格子登记、查询、迁移差分均正确（负坐标 floor 语义与坐标规模无关）。
+     * Cell indexing sign handling: cells with negative coordinates and far-off positive ones register, query
+     * and delta correctly (floor semantics are coordinate-scale independent).
+     */
+    public function testNegativeAndFarCoordinates(): void
+    {
+        $aoi = new GridAOI(10);
+        $neg = new BaseEntity('neg', new Position(-5, -5)); // -1:-1
+        $far = new BaseEntity('far', new Position(12345675, -9876545)); // 1234567:-987655
+        $aoi->updateEntity($neg);
+        $aoi->updateEntity($far);
+
+        self::assertSame(['neg'], $this->ids($aoi->query($neg)));
+        self::assertSame(['far'], $this->ids($aoi->query($far)));
+
+        $neg->move(10, 10); // → 0:0：旧 (-1,-1) 与新 (0,0) 九宫格互相覆盖，f 不受影响 → 空差分
+        // Old and new 3x3 cover each other and far is untouched → empty delta
+        $delta = $aoi->updateEntity($neg);
+        self::assertSame([], $this->ids($delta['entered']));
+        self::assertSame([], $this->ids($delta['left']));
+
+        self::assertSame(['far'], $this->ids($aoi->query($far))); // far 不受影响 far untouched
+    }
+
+    /**
+     * 同 id 重新登记（remove 后或跨大迁移后）：entered 基于当前索引重算，无陈旧列残留。
+     * Re-registration of the same id (after remove or a far move): entered is recomputed from the current
+     * index with no stale columns left behind.
+     */
+    public function testReRegistrationAfterRemoveRecomputesEntered(): void
+    {
+        $aoi = new GridAOI(10);
+        $watcher = new BaseEntity('w', new Position(5, 5));
+        $re = new BaseEntity('r', new Position(15, 5));
+        $aoi->updateEntity($watcher);
+        $aoi->updateEntity($re);
+
+        $aoi->remove($re);
+        $delta = $aoi->updateEntity($re); // 重新登记 → entered 应再次含 w re-registration → entered contains w again
+        self::assertSame(['w'], $this->ids($delta['entered']));
+        self::assertSame([], $this->ids($delta['left']));
+
+        $delta = $aoi->updateEntity($re); // 同格 fast path → 空差分 same-cell fast path → empty delta
+        self::assertSame([], $this->ids($delta['entered']));
+    }
+
+    /**
      * queryShape：bounds 覆盖格粗筛 + contains 精判。圆跨多格，格内但形状外的实体被精判剔除，
      * 形状外但覆盖格内的实体同样剔除，包围盒外实体不参与判定。
      * queryShape: bounds-covered-cell coarse filter + contains precision check. The circle spans several
