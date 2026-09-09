@@ -159,6 +159,42 @@ final class BinaryBatchSerializerTest extends TestCase
         $this->serializer->decodeBatch(substr($packet, 0, strlen($packet) - 3));
     }
 
+    /**
+     * 截断的 LIST 元素必须报错，不得静默补 null（严格协议声明回归点）：
+     * flags=[1,2,3] 尾部字节被逐档裁掉后，旧实现经 ?? 兜底把缺失元素读成 null 且解码「成功」——
+     * 现按声明严格拒绝。逐档切至列表区，每一档都必须 DecodeException。
+     * Truncated LIST elements must error instead of silent null padding (strictness contract regression guard):
+     * the previous impl coerced missing element bytes to T_NULL via ?? and "succeeded". Every cut into the
+     * list region must now throw DecodeException.
+     */
+    public function testTruncatedListElementsThrowInsteadOfNullPadding(): void
+    {
+        $packet = $this->serializer->encodeBatch([Message::create('combat:hit', ['flags' => [1, 2, 3, 4, 5]])]);
+        // 列表区 = 帧尾：3 int 元素 × 9B + 类型/长度前缀，从尾裁 1..20 字节均落在列表元素内
+        // The list occupies the frame tail: every 1..20 byte trim lands inside the elements
+        $sawThrow = 0;
+        for ($cut = 1; $cut <= 20; $cut++) {
+            try {
+                $this->serializer->decodeBatch(substr($packet, 0, strlen($packet) - $cut));
+            } catch (DecodeException) {
+                $sawThrow++;
+            }
+        }
+        self::assertSame(20, $sawThrow, '截断进 LIST 元素的每一档都必须抛 DecodeException');
+    }
+
+    /**
+     * 帧长声明超出缓冲（伪造头 + 短体）必须拒绝：帧级首道闸，先于任何字段解析。
+     * A frame header over-claiming length beyond the buffer is rejected at the frame gate, before field parsing.
+     */
+    public function testFrameLengthBeyondBufferThrows(): void
+    {
+        $this->expectException(DecodeException::class);
+        $this->expectExceptionMessage('帧体越界');
+        $forged = "NX\x00\x01" . pack('N', 1) . pack('N', 999) . pack('n', 0);
+        $this->serializer->decodeBatch($forged);
+    }
+
     public function testUnknownKeyCodeThrows(): void
     {
         $this->expectException(DecodeException::class);

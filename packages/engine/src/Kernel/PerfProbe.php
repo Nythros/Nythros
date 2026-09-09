@@ -125,16 +125,48 @@ final class PerfProbe implements PerfSnapshotProviderInterface
         ];
     }
 
-    /** 毫秒值落入的桶下标（FRAME_BUCKETS_MS 的右开区间）。 Bucket index for a millisecond value (right-open intervals of FRAME_BUCKETS_MS). */
+    /**
+     * 毫秒值落入的桶下标（FRAME_BUCKETS_MS 的右开区间）。升序比较链提前返回——帧耗时/派发耗时
+     * 实测强偏态（P50=0.264/P90=0.475，~90% 落桶 0），升序让热值 1-2 次比较即出；降序对该分布
+     * 恰为最坏（8 次），二分在 9 桶规模下被循环开销吃掉优势（实测均慢于升序，探针 probe-bucket-ab.php）。
+     * 头部 is_nan 显式守卫兜 NaN（与旧 foreach 全不命中落 0 的语义一致）——勿改回 `!($ms >= 0.5)`
+     * 取反守卫：tracing JIT（PHP 8.3.33）下其对 NaN 实测误编译（返回 8），is_nan 短路无此问题
+     * （穷举对拍 + 引擎热态复验，见探针与 CHANGELOG）。
+     * Bucket index for a millisecond value (right-open intervals of FRAME_BUCKETS_MS). Ascending early-return chain:
+     * frame/dispatch durations are heavily right-skewed (~90% in bucket 0 per the published P50=0.264/P90=0.475), so
+     * ascending exits hot values after 1-2 comparisons; descending is the worst case for that distribution and
+     * binary search loses to loop overhead at nine bounds (all measured — probe-bucket-ab.php). The leading is_nan
+     * guard preserves the old foreach's NaN→0 semantics — do NOT rewrite it as `!($ms >= 0.5)`: tracing JIT
+     * (PHP 8.3.33) miscompiles that form for NaN in hot code (returns 8); is_nan() short-circuits safely
+     * (exhaustive parity + engine-hot re-verification, see the probe and CHANGELOG).
+     */
     private static function bucketOf(float $milliseconds): int
     {
-        $index = 0;
-        foreach (self::FRAME_BUCKETS_MS as $i => $bound) {
-            if ($milliseconds >= $bound) {
-                $index = $i;
-            }
+        if (is_nan($milliseconds) || $milliseconds < 0.5) {
+            return 0;
+        }
+        if ($milliseconds < 1.0) {
+            return 1;
+        }
+        if ($milliseconds < 2.0) {
+            return 2;
+        }
+        if ($milliseconds < 4.0) {
+            return 3;
+        }
+        if ($milliseconds < 8.0) {
+            return 4;
+        }
+        if ($milliseconds < 16.0) {
+            return 5;
+        }
+        if ($milliseconds < 32.0) {
+            return 6;
+        }
+        if ($milliseconds < 64.0) {
+            return 7;
         }
 
-        return $index;
+        return 8;
     }
 }

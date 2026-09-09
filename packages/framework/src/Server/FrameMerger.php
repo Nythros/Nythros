@@ -115,33 +115,38 @@ final class FrameMerger
     {
         $result = [];
         foreach ($this->slots as $connId => $frameSlots) {
-            $filterLow = isset($softFilterConnIds[$connId]);
-            $chosen = [];
-            foreach ($frameSlots as $slot) {
-                if ($filterLow && $slot['priority'] === self::PRIORITY_LOW) {
+            // 无软过滤时经 PHP 数组 COW 直接共享帧槽列表（只读遍历零拷贝）；仅过滤命中才逐槽重建
+            // Without the soft filter, share the frame-slot list directly via COW (read-only iteration is
+            // copy-free); the per-slot rebuild happens only for filtered connections
+            if (isset($softFilterConnIds[$connId])) {
+                $chosen = [];
+                foreach ($frameSlots as $slot) {
+                    if ($slot['priority'] !== self::PRIORITY_LOW) {
+                        $chosen[] = $slot;
+                    }
+                }
+
+                if ($chosen === []) {
                     continue;
                 }
-                $chosen[] = $slot;
+            } else {
+                $chosen = $frameSlots;
             }
 
-            if ($chosen === []) {
-                continue;
-            }
-
-            $encode = fn (array $slots): string => $this->serializer->encodeBatch(array_values(array_map(
-                static fn (array $s): Message => Message::create($s['type'], $s['payload']),
-                $slots,
-            )));
-
-            $blob = $encode($chosen);
+            $blob = $this->encodeSlots($chosen);
             if (strlen($blob) > $maxBytesPerConnection) {
                 // 超配额：剔除低优先级帧后重编码（周期快照兜底）；高优先级尽力发送（软配额而非硬截断）
                 // Over quota: re-encode without low-priority frames (covered by the periodic snapshot); high-priority ones are sent best-effort (soft quota, not a hard cut)
-                $kept = array_values(array_filter($chosen, static fn (array $s): bool => $s['priority'] !== self::PRIORITY_LOW));
+                $kept = [];
+                foreach ($chosen as $slot) {
+                    if ($slot['priority'] !== self::PRIORITY_LOW) {
+                        $kept[] = $slot;
+                    }
+                }
                 if ($kept === []) {
                     continue;
                 }
-                $blob = $encode($kept);
+                $blob = $this->encodeSlots($kept);
             }
 
             $result[$connId] = [$blob];
@@ -151,5 +156,21 @@ final class FrameMerger
         $this->stateSlots = [];
 
         return $result;
+    }
+
+    /**
+     * 帧槽列表 → 单个批量包：foreach 直建 Message 列表后一次编码（列表上无需 array_values）。
+     * Slot list → one batch packet: build the Message list with a plain foreach (a list never needs array_values) and encode once.
+     *
+     * @param list<array{type: string, payload: array<string|int, mixed>, priority: string}> $slots 帧槽列表 Frame slots.
+     */
+    private function encodeSlots(array $slots): string
+    {
+        $messages = [];
+        foreach ($slots as $slot) {
+            $messages[] = Message::create($slot['type'], $slot['payload']);
+        }
+
+        return $this->serializer->encodeBatch($messages);
     }
 }

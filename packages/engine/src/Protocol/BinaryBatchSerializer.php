@@ -101,9 +101,15 @@ final class BinaryBatchSerializer implements BatchSerializerInterface
         $offset += 4;
 
         $messages = [];
+        $total = strlen($bytes);
         for ($i = 0; $i < $count; $i++) {
             $len = $this->u32($bytes, $offset, 'frame length');
             $offset += 4;
+            // 帧长必须落在缓冲内：越界声明直接拒绝（后续字段级 need 已穷尽各类型，这里是首道闸）
+            // Frame length must fit the buffer: an over-claiming header is rejected up front
+            if ($len > $total - $offset) {
+                throw new DecodeException('帧体越界（声明长度超出缓冲）。Frame body out of bounds.');
+            }
             $messages[] = $this->decodeFrameBody(substr($bytes, $offset, $len));
             $offset += $len;
         }
@@ -130,7 +136,7 @@ final class BinaryBatchSerializer implements BatchSerializerInterface
             $fieldCount++;
         }
         if ($this->encodeTimestamp && $message->timestamp !== 0.0) {
-            $fixed .= pack('nC', self::K_TIMESTAMP, self::T_FLOAT) . pack('d', $message->timestamp);
+            $fixed .= pack('nCd', self::K_TIMESTAMP, self::T_FLOAT, $message->timestamp);
             $fieldCount++;
         }
 
@@ -202,7 +208,7 @@ final class BinaryBatchSerializer implements BatchSerializerInterface
         return new Message($type, $requestId, $timestamp, $payload);
     }
 
-    /** 编码一个字段：keyCode + valueType + 负载，自动按值类型选择编码。 */
+    /** 编码一个字段：keyCode + valueType + 负载，自动按值类型选择编码。定长负载走单次 pack（nCq/nCd/nCnn），免多次小 pack + 拼接。 */
     private function encodeValue(int $keyCode, mixed $value): string
     {
         if (is_string($value)) {
@@ -211,17 +217,17 @@ final class BinaryBatchSerializer implements BatchSerializerInterface
             }
 
             return strlen($value) <= 255
-                ? pack('nC', $keyCode, self::T_STRING) . pack('C', strlen($value)) . $value
-                : pack('nC', $keyCode, self::T_STRING32) . pack('N', strlen($value)) . $value;
+                ? pack('nCC', $keyCode, self::T_STRING, strlen($value)) . $value
+                : pack('nCN', $keyCode, self::T_STRING32, strlen($value)) . $value;
         }
 
         return match (true) {
             $value === null => pack('nC', $keyCode, self::T_NULL),
             $value === true => pack('nC', $keyCode, self::T_TRUE),
             $value === false => pack('nC', $keyCode, self::T_FALSE),
-            is_int($value) => pack('nC', $keyCode, self::T_INT) . pack('q', $value),
-            is_float($value) => pack('nC', $keyCode, self::T_FLOAT) . pack('d', $value),
-            $this->isPositionList($value) => pack('nC', $keyCode, self::T_POS) . pack('nn', $value['x'], $value['y']),
+            is_int($value) => pack('nCq', $keyCode, self::T_INT, $value),
+            is_float($value) => pack('nCd', $keyCode, self::T_FLOAT, $value),
+            $this->isPositionList($value) => pack('nCnn', $keyCode, self::T_POS, $value['x'], $value['y']),
             is_array($value) => $this->encodeList($keyCode, $value),
             default => throw new ProtocolException(sprintf('不支持的值类型（字段 %d）。Unsupported value type for key %d.', $keyCode, $keyCode)),
         };
@@ -234,22 +240,23 @@ final class BinaryBatchSerializer implements BatchSerializerInterface
      */
     private function encodeList(int $keyCode, array $value): string
     {
-        $out = pack('nC', $keyCode, self::T_LIST) . pack('N', count($value));
+        $out = pack('nCN', $keyCode, self::T_LIST, count($value));
         foreach ($value as $element) {
+            // 定长元素单次 pack（Cq/Cd/Cnn），变长字符串保留前缀+裸串两段
             if (is_int($element)) {
-                $out .= chr(self::T_INT) . pack('q', $element);
+                $out .= pack('Cq', self::T_INT, $element);
             } elseif (is_float($element)) {
-                $out .= chr(self::T_FLOAT) . pack('d', $element);
+                $out .= pack('Cd', self::T_FLOAT, $element);
             } elseif (is_string($element)) {
                 $out .= strlen($element) <= 255
-                    ? chr(self::T_STRING) . pack('C', strlen($element)) . $element
-                    : chr(self::T_STRING32) . pack('N', strlen($element)) . $element;
+                    ? pack('CC', self::T_STRING, strlen($element)) . $element
+                    : pack('CN', self::T_STRING32, strlen($element)) . $element;
             } elseif (is_bool($element)) {
-                $out .= $element ? chr(self::T_TRUE) : chr(self::T_FALSE);
+                $out .= chr($element ? self::T_TRUE : self::T_FALSE);
             } elseif ($element === null) {
                 $out .= chr(self::T_NULL);
             } elseif (is_array($element) && $this->isPositionList($element)) {
-                $out .= chr(self::T_POS) . pack('nn', $element['x'], $element['y']);
+                $out .= pack('Cnn', self::T_POS, $element['x'], $element['y']);
             } else {
                 throw new ProtocolException('LIST 元素类型不支持。Unsupported LIST element type.');
             }
@@ -276,12 +283,12 @@ final class BinaryBatchSerializer implements BatchSerializerInterface
                 return [false, 0];
             case self::T_INT:
                 $this->need($bytes, $offset, 8);
-                $u = unpack('q', substr($bytes, $offset, 8));
+                $u = unpack('q', $bytes, $offset);
 
                 return [$u === false ? throw new DecodeException('非法 q 负载。Invalid q payload.') : $u[1], 8];
             case self::T_FLOAT:
                 $this->need($bytes, $offset, 8);
-                $u = unpack('d', substr($bytes, $offset, 8));
+                $u = unpack('d', $bytes, $offset);
 
                 return [$u === false ? throw new DecodeException('非法 d 负载。Invalid d payload.') : $u[1], 8];
             case self::T_STRING:
@@ -302,7 +309,13 @@ final class BinaryBatchSerializer implements BatchSerializerInterface
                 $offset += 4;
                 $list = [];
                 for ($i = 0; $i < $count; $i++) {
-                    $elemType = ord((string) ($bytes[$offset] ?? "\x00"));
+                    // 元素类型字节必须先验长再读：缺字节即「包体截断」——原实现经 ?? 兜底成 0x00(T_NULL)，
+                    // 截断包被静默补 null 填充（协议头声明严格，此处为对齐该声明的缺陷修复，探针 40 档截断对拍确认）
+                    // The element type byte is length-checked before the read: a missing byte means "truncated" —
+                    // previously ?? coerced it to 0x00 (T_NULL), silently null-padding truncated lists (fixed to match
+                    // the format's strictness contract; verified by the 40-cut probe parity fuzz)
+                    $this->need($bytes, $offset, 1);
+                    $elemType = ord($bytes[$offset]);
                     $offset += 1;
                     [$v, $consumed] = $this->decodeValue($bytes, $offset, $elemType);
                     $offset += $consumed;
@@ -316,7 +329,7 @@ final class BinaryBatchSerializer implements BatchSerializerInterface
         }
     }
 
-    /** 编码一个 string 固定字段（keyCode + valueType + 负载）。 */
+    /** 编码一个 string 固定字段（keyCode + valueType + 负载；定长前缀单次 pack）。 */
     private function encString(int $keyCode, string $value): string
     {
         if ($value === '') {
@@ -324,8 +337,8 @@ final class BinaryBatchSerializer implements BatchSerializerInterface
         }
 
         return strlen($value) <= 255
-            ? pack('nC', $keyCode, self::T_STRING) . pack('C', strlen($value)) . $value
-            : pack('nC', $keyCode, self::T_STRING32) . pack('N', strlen($value)) . $value;
+            ? pack('nCC', $keyCode, self::T_STRING, strlen($value)) . $value
+            : pack('nCN', $keyCode, self::T_STRING32, strlen($value)) . $value;
     }
 
     /** 解码一个 string 字段（用于 type/requestId）。 */
@@ -378,38 +391,37 @@ final class BinaryBatchSerializer implements BatchSerializerInterface
         }
     }
 
+    /** u32 读取：unpack 三参形式（带 offset）原地读，免 substr 中间串。 */
     private function u32(string $bytes, int $offset, string $label): int
     {
         $this->need($bytes, $offset, 4);
-        $u = unpack('N', substr($bytes, $offset, 4));
+        $u = unpack('N', $bytes, $offset);
 
         return $u === false ? throw new DecodeException('非法 u32 负载。Invalid u32 payload.') : $u[1];
     }
 
+    /** u16 读取：双字节 ord 位运算（need 已保证可读），免 substr + unpack 数组分配。 */
     private function u16(string $bytes, int $offset, string $label): int
     {
         $this->need($bytes, $offset, 2);
-        $u = unpack('n', substr($bytes, $offset, 2));
 
-        return $u === false ? throw new DecodeException('非法 u16 负载。Invalid u16 payload.') : $u[1];
+        return (ord($bytes[$offset]) << 8) | ord($bytes[$offset + 1]);
     }
 
+    /** i16 读取：u16 位运算 + 符号扩展（>0x7FFF 回卷负值）。 */
     private function i16(string $bytes, int $offset): int
     {
         $this->need($bytes, $offset, 2);
-        $u = unpack('n', substr($bytes, $offset, 2));
-        if ($u === false) {
-            throw new DecodeException('非法 i16 负载。Invalid i16 payload.');
-        }
-        $raw = $u[1];
+        $raw = (ord($bytes[$offset]) << 8) | ord($bytes[$offset + 1]);
 
         return $raw > 0x7fff ? $raw - 0x10000 : $raw;
     }
 
+    /** f64 读取：unpack 三参原地读。 */
     private function f64(string $bytes, int $offset): float
     {
         $this->need($bytes, $offset, 8);
-        $u = unpack('d', substr($bytes, $offset, 8));
+        $u = unpack('d', $bytes, $offset);
 
         return $u === false ? throw new DecodeException('非法 f64 负载。Invalid f64 payload.') : $u[1];
     }

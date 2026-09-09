@@ -53,6 +53,9 @@
 
 - 编码时未知帧类型/未知负载字段 → \`ProtocolException\`（业务代码必须扩展对应枚举）。
 - 解码时未知 keyCode/值类型/魔数不匹配/截断 → \`DecodeException\`；\`MapServer\` 回 400/422 错误帧。
+  截断为穷尽拒绝：帧长声明超出缓冲在帧级首道闸即拒（\`帧体越界\`），LIST 元素字节缺失按截断抛错——
+  绝不静默补 null（2026-09 修复；回归 \`testTruncatedListElementsThrowInsteadOfNullPadding\` 与
+  \`testFrameLengthBeyondBufferThrows\`，异常面 40 档截断对拍见 \`benchmarks/probe-protocol-ab.php\`）。
 
 ## 6. 实现位置
 

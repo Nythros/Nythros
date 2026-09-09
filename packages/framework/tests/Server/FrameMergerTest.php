@@ -118,6 +118,50 @@ final class FrameMergerTest extends TestCase
         self::assertSame([], $this->merger->drain(1024 * 1024), 'drain 后缓冲必须清空。The buffer must be empty after drain.');
     }
 
+    /**
+     * 全低优先级连接在软过滤下整条跳过（一帧都不发），其他连接不受影响。
+     * A low-priority-only connection under the soft filter is skipped entirely (zero frames), while others are untouched.
+     */
+    public function testAllLowPriorityConnectionSkippedEntirelyUnderSoftFilter(): void
+    {
+        $this->merger->enqueue($this->connA, 'entity_moved', ['id' => 'player-1', 'position' => ['x' => 1, 'y' => 1]]);
+        $this->merger->enqueue($this->connA, 'entity_moved', ['id' => 'player-2', 'position' => ['x' => 2, 'y' => 2]]);
+        $this->merger->enqueue($this->connB, 'entity_enter', ['id' => 'monster-1', 'position' => ['x' => 0, 'y' => 0]]);
+
+        $frames = $this->merger->drain(1024 * 1024, ['conn-a' => true]);
+
+        self::assertArrayNotHasKey('conn-a', $frames, '过滤后无帧可发的连接整条缺席。A connection left with no frames is absent from the drain result.');
+        self::assertArrayHasKey('conn-b', $frames, '未过滤连接照常成包。Unfiltered connections still get their packet.');
+    }
+
+    /**
+     * 超配额且全为低优先级：重编码后无可发帧 → 整条连接本帧不发（软配额尽力语义的边界）。
+     * Over quota with only low-priority frames: after shedding there is nothing to send, so the connection is skipped.
+     */
+    public function testOverQuotaAllLowPriorityConnectionIsSkipped(): void
+    {
+        $this->merger->enqueue($this->connA, 'entity_moved', ['id' => 'player-1', 'position' => ['x' => 1, 'y' => 1]]);
+        $this->merger->enqueue($this->connA, 'entity_moved', ['id' => 'player-2', 'position' => ['x' => 2, 'y' => 2]]);
+
+        self::assertSame([], $this->merger->drain(1), '超配额且全低优先级 → 整条连接本帧不发。Over quota with only low frames → nothing sent.');
+    }
+
+    /**
+     * 多连接独立成包：帧不跨连接、包按连接 id 分键。
+     * Multi-connection drain yields independent per-connection packets with no frame crossing.
+     */
+    public function testMultiConnectionDrainYieldsIndependentPackets(): void
+    {
+        $this->merger->enqueue($this->connA, 'entity_enter', ['id' => 'a', 'position' => ['x' => 1, 'y' => 1]]);
+        $this->merger->enqueue($this->connB, 'combat:hit', ['target' => 'b', 'dmg' => 3]);
+
+        $frames = $this->merger->drain(1024 * 1024);
+
+        self::assertSame(['conn-a', 'conn-b'], array_keys($frames), '每连接一个批量包，键序=入队序。One packet per connection, in enqueue order.');
+        self::assertSame('entity_enter', $this->decodeAll($frames['conn-a'])[0]->type);
+        self::assertSame('combat:hit', $this->decodeAll($frames['conn-b'])[0]->type);
+    }
+
     private function makeConn(string $id): ConnectionInterface
     {
         $conn = $this->createStub(ConnectionInterface::class);
