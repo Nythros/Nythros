@@ -467,6 +467,9 @@ switch ($options['service']) {
             is_string(getenv('NYTHROS_MIN_CLIENT_VERSION')) && preg_match('/^\d+$/', trim((string) getenv('NYTHROS_MIN_CLIENT_VERSION'))) === 1
                 ? (int) trim((string) getenv('NYTHROS_MIN_CLIENT_VERSION'))
                 : null,
+            // 清单指纹（ADR-030）：auth_ok 回传供客户端与编译期码表比对（A 模型：不一致即断开升级）
+            // Manifest fingerprint (ADR-030): echoed via auth_ok for client-side build-time table comparison
+            MapCodec::manifestVersion(),
         );
 
         $socialServer = new SocialServer(

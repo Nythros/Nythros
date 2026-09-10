@@ -438,12 +438,16 @@ final class MapChannelFactory
 
         // 协议版本守卫装配（版本协商，ADR-027）：NYTHROS_MIN_CLIENT_VERSION 注入最低版本，
         // 未设置 = 守卫不启用（存量客户端零影响）。见 docs/security.md §3。
-        // The version-guard assembly (version negotiation, ADR-029): NYTHROS_MIN_CLIENT_VERSION injects the
+        // The version-guard assembly (version negotiation, ADR-027): NYTHROS_MIN_CLIENT_VERSION injects the
         // minimum version; unset = guard off (zero impact on existing clients). See docs/security.md §3.
         $rawMinClientVersion = getenv('NYTHROS_MIN_CLIENT_VERSION');
         if (is_string($rawMinClientVersion) && preg_match('/^\d+$/', trim($rawMinClientVersion)) === 1) {
             $map->setMinClientVersion((int) trim($rawMinClientVersion));
         }
+        // 清单指纹注入（ADR-030）：auth_ok 回传,客户端与编译期生成物比对,不一致断开升级（A 模型：拒绝非适配）。
+        // Manifest fingerprint injection (ADR-030): echoed via auth_ok; clients compare it against their
+        // build-time generated tables and disconnect on mismatch (Model A: reject, never adapt).
+        $map->setManifestVersion(MapCodec::manifestVersion());
 
         // 依赖循环规避：CombatService 以 $map 本身（VisionBroadcaster/ActorLookup 实现）构造后回填；
         // 房间中枢同样回填宿主引用（RoomVisionBroadcaster 投递依赖）。

@@ -158,7 +158,32 @@
   npm（条件跳过）；monorepo 内部依赖 `@dev`→`^0.1`（path repo `options.versions` 注入 `0.1.x-dev`
   保开发期解析，拆分仓纯 tag 定版）；`composer require nythros/engine` 待人工建拆分仓+注册后可用。
 
+### Changed
+
+- **协议 v2 一次切换：type 明文→1B 词表码 + 清单协商地基（[引擎/Protocol + 框架/Social + demo/装配 + client-js]，
+  ADR-030，⚠️ breaking）**：线字节审计发现每帧传 14-16B 明文类型名（词表 typeCode 早已存在却只用于校验、
+  从未上线——「枚举压缩」名不副实）。v2 定稿为**唯一线上形态**：魔数 `NX `、type 字段 0xF3 +
+  新 valueType 0x08 TYPE_CODE + 1B 码值；**v1 就此退役，旧魔数/明文 type 包一律 `DecodeException` 拒绝**
+  （0.x 无外部存量窗口执行一次切，不留双栈）。协商地基补全：auth `version` 存下并经 auth_ok 回显，新增
+  `manifestVersion`（双码表 CRC32，`MapCodec::manifestVersion()`，PayloadKey 84→85）——客户端与编译期生成物
+  比对，**不一致即断开升级（A 模型：拒绝而非适配；B 模型运行时下发被裁决否决：协议变更必然伴随客户端业务代码
+  变更，「能解码」≠「会处理」）**。实测收益：单帧 `entity_moved` 45→33B、热区 60 帧批量 2218→1498B
+  （**-32.5%**），engine-bench 监听项 binary_batch_decode +290%（含机器漂移，wire 变小为实因）；跨语言黄金
+  向量（163B hex）逐字节钉死 PHP/JS 两侧（`testV2GoldenBytesMatchClientJsCrossEncoder` ↔ `codec.test.mjs`），
+  改 wire 必两端同步重生成。验证链：协议测 250 全绿 + node 19/19 + **E2E `verify-phase5` 11/11**
+  （含 Map 二进制 auth 与战斗直连；`verify-combat` 前置在 v1 对照组同样失败，证实与本改动无关的环境因素）。
+  迁移：客户端 `protocolVersion` 缺省升 2；生产建议 `NYTHROS_MIN_CLIENT_VERSION=2`；自研客户端按
+  protocol.md §2-§4/§7 新表接入；后续演进（INT varint、keyCode 1B、EVENT_BUNDLE 位图）各走独立 ADR。
+
 ### Performance
+
+- **BaseEntity::getPosition 数组缓存：实测达标但**决策挂起**（记录在案，未实施）**：该方法每次调用
+  新建 `['x'=>,'y'=>]`（46 个调用点，AOI 帧内每实体读 2~8 次）。实体侧缓存变体经探针
+  `probe-position-ab.php` 验证达标——10 万次随机 move 逐值全等 + COW 改写不污染 + JIT 双模式，
+  读密集 +15~45%（值对象侧变体被实测否决）。但绝对量属微秒级（单帧省 <0.1ms，帧预算利用率 <3%），
+  不改变任何瓶颈顺序；**决策：让位于带宽主线**（大地图形态下网卡先于 CPU 撞墙），CPU 微优化整体
+  冻结于此。更大的「getPosition 返 Position 对象」（消费侧 -46%）卡在 `EntityInterface` v0.1 冻结
+  契约，与协议 type 压缩一并留作 1.0 ADR 议题。探针与结论保留，重启成本≈零。
 
 - **FrameMerger::drain 出站每连接省一遍全帧复制（+10% 端到端，双 JIT 一致）**：① 无软过滤（常态）时
   `$chosen` 经 PHP 数组 COW 直接共享帧槽列表，免逐槽 append 重建；② `$encode` 闭包提升为私有方法

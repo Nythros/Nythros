@@ -7,26 +7,43 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { NythrosCodec, FRAME_TYPES, PAYLOAD_KEYS, FRAME_NAMES, KEY_NAMES, NythrosClient, NythrosInterpolator } = require('../nythros-client.js');
 
-const MAGIC = [0x4e, 0x58, 0x00, 0x01];
+const MAGIC = [0x4e, 0x58, 0x00, 0x02];
 
 function roundtrip(frames) {
   return NythrosCodec.decodeBatch(NythrosCodec.encodeBatch(frames));
 }
 
-test('码表规模与 PHP 枚举一致（88 帧 / 84 字段）', () => {
+test('码表规模与 PHP 枚举一致（88 帧 / 85 字段）', () => {
   assert.equal(Object.keys(FRAME_TYPES).length, 88);
-  assert.equal(Object.keys(PAYLOAD_KEYS).length, 84);
+  assert.equal(Object.keys(PAYLOAD_KEYS).length, 85);
   // 反查表与正表互逆
   for (const [name, code] of Object.entries(FRAME_TYPES)) assert.equal(FRAME_NAMES[code], name);
   for (const [name, code] of Object.entries(PAYLOAD_KEYS)) assert.equal(KEY_NAMES[code], name);
 });
 
-test('批量包头部：魔数 NX\\0\\x01 + 大端帧数', () => {
+test('批量包头部：魔数 NX\\0\\x02 + 大端帧数（v2，ADR-030）', () => {
   const bytes = NythrosCodec.encodeBatch([
     { type: 'move', payload: { dx: 1, dy: 2 } },
   ]);
   assert.deepEqual([...bytes.slice(0, 4)], MAGIC);
   assert.equal(bytes[4] << 24 | bytes[5] << 16 | bytes[6] << 8 | bytes[7], 1);
+});
+
+test('v2 跨语言黄金向量：与 PHP BinaryBatchSerializer 同输入逐字节一致（ADR-030，同一 hex 钉在 PHP 侧测试）', () => {
+  const golden = '4E5800020000000400000014000300F3080100010303702D310003060025FFA80000002A000500F3080400F20303722D31000103036D2D3200100180000000000000000011015C1100000000000000000029000500F30810000B03027531000C0306736563726574000D03046D61696E005401020000000000000000000024000400F3080600010303642D39000306000300040016030C73776F72642D69726F6E2D31';
+  const frames = [
+    { type: 'entity_moved', payload: { id: 'p-1', position: { x: 37, y: -88 } } },
+    { type: 'combat:hit', requestId: 'r-1', payload: { id: 'm-2', damage: 128, hp: 4444 } },
+    { type: 'auth', payload: { username: 'u1', password: 'secret', mapId: 'main', version: 2 } },
+    { type: 'drop:spawned', payload: { id: 'd-9', position: { x: 3, y: 4 }, itemId: 'sword-iron-1' } },
+  ];
+  assert.equal(Buffer.from(NythrosCodec.encodeBatch(frames)).toString('hex').toUpperCase(), golden);
+  const decoded = NythrosCodec.decodeBatch(Buffer.from(golden, 'hex'));
+  assert.equal(decoded.length, 4);
+  assert.equal(decoded[0].payload.position.y, -88);
+  assert.equal(decoded[1].requestId, 'r-1');
+  assert.equal(decoded[1].payload.hp, 4444);
+  assert.equal(decoded[3].payload.itemId, 'sword-iron-1');
 });
 
 test('全部值类型 roundtrip：int/负数/float/string/空串/长串/list/position/bool/null', () => {
@@ -84,13 +101,17 @@ test('不支持的值类型快速失败', () => {
   assert.throws(() => NythrosCodec.encodeBatch([{ type: 'move', payload: { id: { nested: true } } }]), /不支持的值类型/);
 });
 
-test('JS 侧不校验 type 字段名（编码宽松，PHP 词表侧快速失败）——解码未知 keyCode 仍严格', () => {
-  // encodeFrameBody 对 type 只做字符串编码（与服务器权威词表解耦）；但解码侧 keyCode 必须在码表内。
-  // 这里验证解码严格性：构造一个含未知 keyCode 的帧体（2B 字段数 + keyCode=0x7fff + NULL）。
-  const body = new Uint8Array(2 + 3);
-  new DataView(body.buffer).setUint16(0, 1, false);
-  new DataView(body.buffer).setUint16(2, 0x7fff, false);
-  body[4] = 0x00; // T_NULL
+test('v2 编码/解码双侧严格：未知帧类型编码快速失败、解码未知 keyCode 拒绝（ADR-030：type 上线走词表码,不再有明文宽松通道）', () => {
+  // 编码严格：type 码值必须由 FRAME_TYPES 提供，未知即抛（与 PHP encode 的「未知帧类型」同纪律）。
+  assert.throws(() => NythrosCodec.encodeBatch([{ type: 'ghost:frame', payload: {} }]), /未知帧类型/);
+  // 解码严格：构造含未知 keyCode 的帧体（type 槽合法 + keyCode=0x7fff + NULL）。
+  const typeSlot = new Uint8Array([0x00, 0xf3, 0x08, 0x11]); // K_TYPE + T_TYPE_CODE + auth(0x11=17)
+  const body = new Uint8Array(2 + typeSlot.length + 3);
+  const view = new DataView(body.buffer);
+  view.setUint16(0, 2, false);
+  body.set(typeSlot, 2);
+  view.setUint16(6, 0x7fff, false);
+  body[8] = 0x00; // T_NULL
   assert.throws(() => NythrosCodec.decodeFrameBody(new DataView(body.buffer)), /未知 keyCode/);
 });
 
@@ -137,15 +158,15 @@ test('NythrosClient：登录链路两段 auth 均携带协议版本（ADR-027）
     await new Promise((r) => setTimeout(r, 10));
     client.token = 'tok-1'; // 模拟网关回包完成 Simulates the gateway reply completing.
     const gwJson = JSON.parse(sent[0]);
-    assert.equal(gwJson.version, 1);
-    assert.equal(gwJson.payload.version, 1);
+    assert.equal(gwJson.version, 2);
+    assert.equal(gwJson.payload.version, 2);
     // Map 段（二进制批量帧）
     // The Map leg (binary batch frames).
     const mapPromise = client.openMap(1000);
     await new Promise((r) => setTimeout(r, 10));
     const mapFrames = NythrosCodec.decodeBatch(new Uint8Array(sent[1]));
     assert.equal(mapFrames[0].type, 'auth');
-    assert.equal(mapFrames[0].payload.version, 1);
+    assert.equal(mapFrames[0].payload.version, 2);
     assert.equal(mapFrames[0].payload.token, 'tok-1');
     // 假连接永不回包：显式吞掉后续超时拒绝，避免悬挂 rejection 干扰测试进程
     // The fake connection never replies: swallow the later timeout rejections so no dangling rejection escapes.

@@ -27,4 +27,15 @@ final class MapCodec
             keyCodes: PayloadKey::codeMap(),
         ));
     }
+
+    /**
+     * 清单指纹（ADR-030）：typeCodes+keyCodes 两份码表的稳定哈希,装配期注入 auth_ok 回传,
+     * 客户端与自身编译期生成物比对——不一致即断开升级(A 模型:拒绝而非适配)。
+     * Manifest fingerprint (ADR-030): a stable hash over both code maps, echoed via auth_ok so clients can
+     * reject on mismatch against their build-time generated tables (Model A: reject, never adapt).
+     */
+    public static function manifestVersion(): int
+    {
+        return crc32((string) json_encode([FrameType::codeMap(), PayloadKey::codeMap()]));
+    }
 }

@@ -70,7 +70,7 @@ const PAYLOAD_KEYS = {
   "buffId": 69, "stacks": 70, "durationSeconds": 71, "queueId": 72,
   "level": 73, "questIds": 74, "required": 75, "completed": 76,
   "rewarded": 77, "npcId": 78, "ids": 79, "types": 80,
-  "counts": 81, "questId": 82, "divisor": 83, "version": 84,
+  "counts": 81, "questId": 82, "divisor": 83, "version": 84, "manifestVersion": 85,
 };
 
 // ── 保留固定字段 keyCode（高位段，与 BinaryBatchSerializer 一致） ──
@@ -80,9 +80,9 @@ const K_TIMESTAMP = 0xf1, K_REQUEST_ID = 0xf2, K_TYPE = 0xf3;
 // ── 值类型码（与 BinaryBatchSerializer 一致） ──
 // ── Value-type codes (matching BinaryBatchSerializer) ──
 const T_NULL = 0x00, T_INT = 0x01, T_FLOAT = 0x02, T_STRING = 0x03, T_STRING32 = 0x04,
-  T_LIST = 0x05, T_POS = 0x06, T_EMPTY_STRING = 0x07, T_TRUE = 0xf0, T_FALSE = 0xf1;
+  T_LIST = 0x05, T_POS = 0x06, T_EMPTY_STRING = 0x07, T_TYPE_CODE = 0x08, T_TRUE = 0xf0, T_FALSE = 0xf1;
 
-const MAGIC = [0x4e, 0x58, 0x00, 0x01]; // "NX\0\x01"
+const MAGIC = [0x4e, 0x58, 0x00, 0x02]; // "NX\0\x02"（v2 首版正式形态,ADR-030 一次切不留 v1）
 const FRAME_NAMES = Object.fromEntries(Object.entries(FRAME_TYPES).map(([k, v]) => [v, k]));
 const KEY_NAMES = Object.fromEntries(Object.entries(PAYLOAD_KEYS).map(([k, v]) => [v, k]));
 
@@ -126,7 +126,12 @@ class NythrosCodec {
 
   /** 编码帧体：[2B 字段数]{ [2B keyCode][1B valueType][负载] }。 Encodes one frame body. */
   static encodeFrameBody(frame) {
-    const fields = [[K_TYPE, NythrosCodec.encString(frame.type)]];
+    // type 恒走 T_TYPE_CODE 1B 码（ADR-030 v2：明文 type 编码退役）
+    const typeCode = FRAME_TYPES[frame.type];
+    if (typeCode === undefined) {
+      throw new Error('Nythros 协议：未知帧类型 ' + frame.type + '（未登记进 FrameType 枚举）');
+    }
+    const fields = [[K_TYPE, { type: T_TYPE_CODE, data: new Uint8Array([typeCode]) }]];
     if (frame.requestId != null) {
       fields.push([K_REQUEST_ID, NythrosCodec.encString(String(frame.requestId))]);
     }
@@ -233,7 +238,15 @@ class NythrosCodec {
       const keyCode = NythrosCodec.readU16(view, off);
       const valueType = view.getUint8(off + 2);
       off += 3;
-      if (keyCode === K_TYPE) { const r = NythrosCodec.decString(view, off, valueType); frame.type = r.value; off += r.consumed; continue; }
+      if (keyCode === K_TYPE) {
+        if (valueType !== T_TYPE_CODE) throw new Error('Nythros 协议：type 字段编码非法（应 0x08 TYPE_CODE）');
+        if (off + 1 > view.byteLength) throw new Error('Nythros 协议：typeCode 越界');
+        const typeName = FRAME_NAMES[view.getUint8(off)];
+        if (typeName === undefined) throw new Error('Nythros 协议：未知 typeCode ' + view.getUint8(off));
+        frame.type = typeName;
+        off += 1;
+        continue;
+      }
       if (keyCode === K_REQUEST_ID) { const r = NythrosCodec.decString(view, off, valueType); frame.requestId = r.value; off += r.consumed; continue; }
       if (keyCode === K_TIMESTAMP) {
         if (valueType !== T_FLOAT) throw new Error('Nythros 协议：timestamp 字段类型错误');
@@ -457,7 +470,7 @@ class NythrosClient {
    * @param {string} [options.mapUrl='ws://127.0.0.1:18081'] Map 直连地址（二进制批量协议） The Map URL (binary batch protocol).
    * @param {string} [options.mapId='map-1'] 期望落图的地图 id The expected map id.
    * @param {number} [options.baseTickMs=50] 服务端 base tick 周期（插值引擎用） The server base tick period (for the interpolation engine).
-     * @param {number} [options.protocolVersion=1] 客户端协议版本（auth 帧携带，ADR-027 版本协商）。
+     * @param {number} [options.protocolVersion=2] 客户端协议版本（auth 帧携带，ADR-027 协商 + ADR-030 v2 线格式）。
      *   The client protocol version (carried by the auth frames, version negotiation ADR-027).
      * @param {boolean} [options.autoReconnect=false] 断线自动重连（整链重登：gateway → token → Map；服务端在
    *   detach 时自动导出转移票据，重连 attach 即恢复位置/血量/背包——重连即同图迁移）。
@@ -480,7 +493,7 @@ class NythrosClient {
     this.gatewayUrl = options.gatewayUrl ?? 'ws://127.0.0.1:18285';
     this.mapUrl = options.mapUrl ?? 'ws://127.0.0.1:18081';
     this.autoReconnect = options.autoReconnect ?? false;
-    this.protocolVersion = options.protocolVersion ?? 1;
+    this.protocolVersion = options.protocolVersion ?? 2;
     this.maxReconnectAttempts = options.maxReconnectAttempts ?? 5;
     this.reconnectDelayMs = options.reconnectDelayMs ?? 2000;
     this.token = null;

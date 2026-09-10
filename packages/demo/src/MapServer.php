@@ -107,6 +107,13 @@ final class MapServer extends RealtimeServer implements VisionBroadcasterInterfa
     /** 最低客户端协议版本（null = 版本守卫不启用）。装配期经 setMinClientVersion 注入。 The minimum client protocol version (null = the version guard is off), injected via setMinClientVersion at assembly. */
     private ?int $minClientVersion = null;
 
+    /**
+     * 清单版本（协议热更，ADR-027 延伸）：连接建立时 auth_ok 回传给客户端,用于握手后强制对齐。
+     * Manifest version: echoed to the client on auth_ok (handshake-time alignment per ADR-027 extension);
+     * mismatch triggers a reject (A 模型), not an adaptation.
+     */
+    private int $manifestVersion = 1;
+
     /** @var array<string, Inventory> entityId => 玩家背包（auth 初始化、pickup 消费） entityId => player inventory (initialized on auth, consumed on pickup). */
     private array $inventories;
 
@@ -1555,7 +1562,16 @@ final class MapServer extends RealtimeServer implements VisionBroadcasterInterfa
             $participant->onSessionOpen($record->uid);
         }
 
-        $this->send($conn, Message::create('auth_ok', ['uid' => $record->uid, 'id' => $entityId], $message->requestId));
+        // auth_ok 回带协商结果（ADR-027 地基补全）：version=双方对齐的协议版本、manifestVersion=服务端清单指纹，
+        // 客户端与自身编译期清单比对，不一致即断开提示升级——A 模型「拒绝而非适配」，杜绝「能解码不能处理」的静默裂缝。
+        // auth_ok carries the negotiation outcome: the agreed protocol version plus the server manifest fingerprint;
+        // the client compares it against its build-time manifest and disconnects on mismatch (reject, never adapt).
+        $this->send($conn, Message::create('auth_ok', [
+            'uid' => $record->uid,
+            'id' => $entityId,
+            'version' => is_int($version) ? $version : 0,
+            'manifestVersion' => $this->manifestVersion,
+        ], $message->requestId));
     }
 
     /** 视野帧负载装饰：掉落物实体附加 itemId（掉落视野进入与 drop:spawned 信息等价）。 View-frame decoration: drop entities carry itemId (drop view-enters stay equivalent to drop:spawned). */
@@ -1788,6 +1804,12 @@ final class MapServer extends RealtimeServer implements VisionBroadcasterInterfa
     public function setMinClientVersion(?int $minClientVersion): void
     {
         $this->minClientVersion = $minClientVersion;
+    }
+
+    /** 注入清单版本（MapCodec::manifestVersion() 装配期计算,见 ADR-030）。Injects the manifest fingerprint at assembly. */
+    public function setManifestVersion(int $manifestVersion): void
+    {
+        $this->manifestVersion = $manifestVersion;
     }
 
     /**

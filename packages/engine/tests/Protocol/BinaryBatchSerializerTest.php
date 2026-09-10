@@ -149,7 +149,7 @@ final class BinaryBatchSerializerTest extends TestCase
     public function testBadMagicThrows(): void
     {
         $this->expectException(DecodeException::class);
-        $this->serializer->decodeBatch("NX\x00\x02rest");
+        $this->serializer->decodeBatch("NX\x00\x09rest");
     }
 
     public function testTruncatedPacketThrows(): void
@@ -184,6 +184,41 @@ final class BinaryBatchSerializerTest extends TestCase
     }
 
     /**
+     * v2 跨语言黄金向量（ADR-030）：与 client-js NythrosCodec 对同一输入的输出逐字节一致
+     * （node test/codec.test.mjs 内嵌同一条 hex 交叉钉死）。词表码值取 demo 权威枚举同码，
+     * 覆盖 TYPE_CODE/STRING/INT(q)/POS 与负坐标；改动 wire 格式必须两端同步重生成。
+     * Cross-language golden vector for v2 (ADR-030): byte-identical with client-js NythrosCodec output for the
+     * same input (the same hex is pinned in node test/codec.test.mjs). Codes mirror the demo authoritative enums;
+     * covers TYPE_CODE/STRING/INT/POS incl. negative coords. Any wire-format change must regenerate both sides.
+     */
+    public function testV2GoldenBytesMatchClientJsCrossEncoder(): void
+    {
+        $serializer = new BinaryBatchSerializer(new ProtocolVocabulary(
+            typeCodes: ['entity_moved' => 1, 'combat:hit' => 4, 'auth' => 16, 'drop:spawned' => 6],
+            keyCodes: ['id' => 1, 'position' => 3, 'username' => 11, 'password' => 12, 'mapId' => 13, 'damage' => 16, 'hp' => 17, 'itemId' => 22, 'version' => 84],
+        ));
+        $frames = [
+            Message::create('entity_moved', ['id' => 'p-1', 'position' => ['x' => 37, 'y' => -88]]),
+            Message::create('combat:hit', ['id' => 'm-2', 'damage' => 128, 'hp' => 4444], 'r-1'),
+            Message::create('auth', ['username' => 'u1', 'password' => 'secret', 'mapId' => 'main', 'version' => 2]),
+            Message::create('drop:spawned', ['id' => 'd-9', 'position' => ['x' => 3, 'y' => 4], 'itemId' => 'sword-iron-1']),
+        ];
+        $golden = '4E5800020000000400000014000300F3080100010303702D310003060025FFA80000002A000500F3080400F20303722D31000103036D2D3200100180000000000000000011015C1100000000000000000029000500F30810000B03027531000C0306736563726574000D03046D61696E005401020000000000000000000024000400F3080600010303642D39000306000300040016030C73776F72642D69726F6E2D31';
+
+        self::assertSame($golden, strtoupper(bin2hex($serializer->encodeBatch($frames))), 'PHP 编码必须与 golden（= JS 输出）逐字节一致。');
+
+        $decoded = $serializer->decodeBatch((string) hex2bin($golden));
+        self::assertCount(4, $decoded);
+        self::assertSame('entity_moved', $decoded[0]->type);
+        self::assertSame(['id' => 'p-1', 'position' => ['x' => 37, 'y' => -88]], $decoded[0]->payload);
+        self::assertSame('r-1', $decoded[1]->requestId);
+        self::assertSame(['id' => 'm-2', 'damage' => 128, 'hp' => 4444], $decoded[1]->payload);
+        self::assertSame(2, $decoded[2]->payload['version']);
+        self::assertSame(['x' => 3, 'y' => 4], $decoded[3]->payload['position']);
+        self::assertSame('sword-iron-1', $decoded[3]->payload['itemId']);
+    }
+
+    /**
      * 帧长声明超出缓冲（伪造头 + 短体）必须拒绝：帧级首道闸，先于任何字段解析。
      * A frame header over-claiming length beyond the buffer is rejected at the frame gate, before field parsing.
      */
@@ -191,7 +226,7 @@ final class BinaryBatchSerializerTest extends TestCase
     {
         $this->expectException(DecodeException::class);
         $this->expectExceptionMessage('帧体越界');
-        $forged = "NX\x00\x01" . pack('N', 1) . pack('N', 999) . pack('n', 0);
+        $forged = "NX\x00\x02" . pack('N', 1) . pack('N', 999) . pack('n', 0);
         $this->serializer->decodeBatch($forged);
     }
 
@@ -202,7 +237,7 @@ final class BinaryBatchSerializerTest extends TestCase
         // 手工构造：魔数 + count=1 + 帧长 + 帧体（fieldCount=1 + keyCode=99 未注册 + EMPTY_STRING 类型）
         // Hand-built packet: magic + count=1 + frame length + body (fieldCount=1 + unregistered keyCode 99 + EMPTY_STRING type)
         $body = pack('n', 1) . pack('nC', 99, 0x07);
-        $this->serializer->decodeBatch("NX\x00\x01" . pack('N', 1) . pack('N', strlen($body)) . $body);
+        $this->serializer->decodeBatch("NX\x00\x02" . pack('N', 1) . pack('N', strlen($body)) . $body);
     }
 
     public function testSingleFrameDecode(): void

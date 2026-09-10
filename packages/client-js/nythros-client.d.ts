@@ -281,6 +281,7 @@ export interface PayloadCodeTable {
   readonly "questId": 82;
   readonly "divisor": 83;
   readonly "version": 84;
+  readonly "manifestVersion": 85;
 }
 
 /** 负载键名字面量联合。 The payload-key name literal union. */
@@ -368,7 +369,8 @@ export type PayloadKeyName =
   | "counts"
   | "questId"
   | "divisor"
-  | "version";
+  | "version"
+  | "manifestVersion";
 
 // ── 以下为手写模板段（与 nythros-client.js 的运行时一一对应） ──
 // ── The hand-written template below (one-to-one with nythros-client.js's runtime) ──

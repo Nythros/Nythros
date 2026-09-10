@@ -1815,7 +1815,7 @@ Skill 插件：向 Container 注册 SkillRepository，并订阅 'skill.cast' 作
 
 | 方法 | 说明 |
 |---|---|
-| `__construct(Nythros\Framework\Social\ConnectionHubInterface $hub, Nythros\Security\TokenManagerInterface $tokenManager, Nythros\Cluster\ServiceRegistryInterface $registry, Nythros\Security\AuthenticatorInterface $authenticator, Nythros\Framework\Social\LocationStoreInterface $location, Nythros\Framework\Social\GuildStoreInterface $guild, Nythros\Framework\Social\TeamStoreInterface $team, Nythros\Protocol\SerializerInterface $serializer, array $mapIds, array $endpointAddresses = [...], ?Nythros\Framework\Social\FriendStoreInterface $friend = NULL, ?int $minClientVersion = NULL)` | 组装社交业务依赖。 |
+| `__construct(Nythros\Framework\Social\ConnectionHubInterface $hub, Nythros\Security\TokenManagerInterface $tokenManager, Nythros\Cluster\ServiceRegistryInterface $registry, Nythros\Security\AuthenticatorInterface $authenticator, Nythros\Framework\Social\LocationStoreInterface $location, Nythros\Framework\Social\GuildStoreInterface $guild, Nythros\Framework\Social\TeamStoreInterface $team, Nythros\Protocol\SerializerInterface $serializer, array $mapIds, array $endpointAddresses = [...], ?Nythros\Framework\Social\FriendStoreInterface $friend = NULL, ?int $minClientVersion = NULL, int $manifestVersion = 0)` | 组装社交业务依赖。 |
 | `handleAuth(string $clientId, Nythros\Protocol\Message $msg): void` | 认证登录（ADR-015 §1.4 完整流程）：authenticate → mapId 白名单 → 踢旧连新 → 恢复判定 → |
 | `handleChat(string $clientId, string $uid, Nythros\Protocol\Message $msg): void` | 聊天五语义（ADR-015 §1.5）：world/channel/team/guild/private，错误一律 chat:error 回发起方。 |
 | `handleClose(string $uid): void` | 连接关闭：写掉线标记（ADR-015 §1.8）。 |

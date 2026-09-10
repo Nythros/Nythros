@@ -80,6 +80,9 @@ final class SocialService
         private readonly ?FriendStoreInterface $friend = null,
         /** @var int|null 最低客户端协议版本（null = 版本守卫不启用；见 handleAuth ⓪）。 The minimum client protocol version (null = the guard is off; see handleAuth's step ⓪). */
         private readonly ?int $minClientVersion = null,
+        /** @var int 清单版本（ADR-030）：auth_ok 回传供客户端与编译期生成物比对,0 = 装配层未注入（不校验）。
+         *  Manifest version (ADR-030): echoed in auth_ok for client-side comparison against its build-time tables; 0 = not injected (no check). */
+        private readonly int $manifestVersion = 0,
     ) {
     }
 
@@ -221,6 +224,14 @@ final class SocialService
             'team' => $teamInfo !== null ? ['teamId' => $teamId, 'leaderUid' => $teamInfo['leaderUid'], 'members' => $teamInfo['members']] : null,
             'guild' => $guildInfo !== null ? ['guildId' => $guildId, 'members' => $guildInfo['members']] : null,
         ];
+        // 协商结果回传（ADR-027/037 地基）：version=客户端自报并对齐的协议版本,manifestVersion=服务端清单指纹,
+        // 客户端据此与编译期码表比对,不一致即断开升级（A 模型：拒绝而非适配）。
+        // Negotiation echo-back: the agreed protocol version + the server manifest fingerprint; the client compares
+        // the fingerprint against its build-time tables and disconnects on mismatch (Model A: reject, never adapt).
+        if ($this->manifestVersion > 0) {
+            $payload['version'] = is_int($version) ? $version : 0;
+            $payload['manifestVersion'] = $this->manifestVersion;
+        }
         if ($endpoints !== []) {
             $payload['endpoints'] = $endpoints;
         }

@@ -18,7 +18,7 @@
 ## 2. 批量包布局（全部大端）
 
 \`\`\`
-[4B 魔数 "NX" + 0x00 0x01] [4B 帧数 count] { 逐帧: [4B 帧长 len] [len 字节帧体] }
+[4B 魔数 "NX" + 0x00 0x02] [4B 帧数 count] { 逐帧: [4B 帧长 len] [len 字节帧体] }
 \`\`\`
 
 ## 3. 帧体布局
@@ -47,6 +47,7 @@
 | 0x05 | LIST | [4B 元素数] { 每元素 [1B 元素类型] [值负载] } |
 | 0x06 | POS | [2B int16 x] [2B int16 y]（坐标专用，仅 payload['position'] 形状 \`{x:int, y:int}\`） |
 | 0x07 | EMPTY_STRING | 无（空串） |
+| 0x08 | TYPE_CODE | [1B typeCode]（仅 type 字段；词表 ProtocolVocabulary 反查，码值经 manifestVersion 对齐） |
 | 0xF0 / 0xF1 | TRUE / FALSE | 无 |
 
 ## 5. 失败路径（快速失败，强制维护枚举）
@@ -64,3 +65,17 @@
 - 业务字典：\`packages/demo/src/Protocol/FrameType.php\`、\`PayloadKey.php\`（中英双语注释）。
 - 工厂：\`packages/demo/src/Protocol/MapCodec.php\`（由两枚枚举组装词表，返回二进制序列化器）。
 - 传输：\`WorkermanWebSocketServer::handleConnect\` 设置 \`websocketType = BINARY_TYPE_ARRAYBUFFER\`（二进制 WebSocket 帧）。
+
+## 7. 协议版本与清单对齐（ADR-030，v2）
+
+- **v2 = 当前唯一线上形态**（魔数尾字节 0x02）：type 字段恒以 0x08 TYPE_CODE 携带 1B 码值（词表反查），
+  明文帧类型编码已于一次切换中退役、不留 v1 兼容——v1 包（魔数 0x01 / 明文 type）一律 `DecodeException` 拒绝。
+- **握手协商三件套**：客户端 auth 携带 `version`（v2 起缺省 2）；服务端 auth_ok 回带 `version` + `manifestVersion`
+  （typeCodes+keyCodes 双码表 CRC32 指纹，`MapCodec::manifestVersion()`）；客户端与编译期生成物比对，
+  **不一致即断开升级（A 模型：拒绝而非适配）**——杜绝「能解码字节、不会处理事件」的静默裂缝。
+- **码表同步链路**：`FrameType`/`PayloadKey` 枚举为唯一事实源 → `generate-definitions.php` 派生 .d.ts/TS；
+  `nythros-client.js` 码表按铁律手工同步；跨语言黄金向量（同一条 hex）钉死在
+  `BinaryBatchSerializerTest::testV2GoldenBytesMatchClientJsCrossEncoder` 与 `codec.test.mjs` 两侧——
+  改动 wire 格式必须两端同步重生成。
+- **清单演进纪律**：码值一经发布不得复用/改义；加新事件 = 枚举末尾追加 → manifestVersion 变化 → 客户端随版本同步升级。
+  varint 化 INT、1B keyCode、位图事件打包（EVENT_BUNDLE）为后续提案，均须走 ADR。

@@ -301,6 +301,9 @@ enum PayloadKey: int
     /** 客户端协议版本（gateway JSON auth 与 Map 二进制 auth 携带；服务器按最低版本守卫拒绝旧客户端）。 The client protocol version (carried by both the gateway JSON auth and the Map binary auth; the server rejects pre-minimum clients). */
     case VERSION = 84;
 
+    /** 服务端清单指纹（auth_ok 回传，ADR-030）：客户端与编译期码表比对，不一致即断开升级（A 模型：拒绝非适配）。 Server manifest fingerprint (echoed in auth_ok, ADR-030): the client compares it against its build-time code tables and disconnects on mismatch (Model A: reject, never adapt). */
+    case MANIFEST_VERSION = 85;
+
     /**
      * 字段名（协议字符串，如 'position'）→ 编码。
      * Payload-key name (wire string, e.g. 'position') → code.
@@ -393,6 +396,7 @@ enum PayloadKey: int
             'questId' => self::QUEST_ID->value,
             'divisor' => self::DIVISOR->value,
             'version' => self::VERSION->value,
+            'manifestVersion' => self::MANIFEST_VERSION->value,
         ];
     }
 }

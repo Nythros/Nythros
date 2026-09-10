@@ -5,33 +5,36 @@ declare(strict_types=1);
 namespace Nythros\Protocol;
 
 /**
- * 二进制批量序列化器：把 N 条 Message 编码为一条 WebSocket 二进制包，并对帧类型/字段名做枚举压缩。
+ * 二进制批量序列化器 v2：把 N 条 Message 编码为一条 WebSocket 二进制包，帧类型/字段名全走词表编码。
  *
  * 批量包布局（全部大端，pack('N')）：
- *   [4B 魔数 "NX\0\x01"][4B 帧数 count][ 逐帧：4B 长度 len + len 字节帧体 ... ]
+ *   [4B 魔数 "NX\0\x02"][4B 帧数 count][ 逐帧：4B 长度 len + len 字节帧体 ... ]
  * 帧体布局：
  *   [2B 字段数][ 逐字段：2B keyCode + 1B valueType + 负载 ... ]
  *
  * 字段 keyCode 语义（保留给本实现的固定字段，处于高位 0xF1-0xF3，负载字段从 1 起自由分配，互不冲突）：
- *   0xF3 = type（STRING，恒有）  0xF2 = requestId（STRING，可选）  0xF1 = timestamp（FLOAT，可选）
+ *   0xF3 = type（TYPE_CODE，恒有）  0xF2 = requestId（STRING，可选）  0xF1 = timestamp（FLOAT，可选）
  *
  * valueType（1 字节）：
  *   0x00 NUL 空值        0x01 INT 有符号 64 位 (pack('q'))   0x02 FLOAT 双精度
  *   0x03 STRING 短串（1B 长度 + UTF-8）  0x04 STRING32 长串（4B 长度）
  *   0x05 LIST 长度前缀列表（4B 元素数 + 每元素 1B 元素类型 + 负载）
  *   0x06 POS 定长坐标（2B int16 x + 2B int16 y）
- *   0x07 EMPTY_STRING 空串（无负载）   0xF0 TRUE / 0xF1 FALSE
+ *   0x07 EMPTY_STRING 空串（无负载）   0x08 TYPE_CODE type 码（1B typeCode，词表反查）   0xF0 TRUE / 0xF1 FALSE
  *
  * 核心目标：把自描述 JSON（type/requestId/timestamp/payload + 长字段名）压缩为词表驱动的紧凑结构；
  * requestId=null、timestamp=0.0 等默认值跳过以省字节。未知帧类型/字段/值类型抛 ProtocolException（单一来源，严格）。
+ * v2 为首个正式发布形态（ADR-030 一次切、不留 v1 兼容）：魔数 0x02、type 恒走 0x08 TYPE_CODE 1B 码，
+ * 旧 v1 明文 type 包会被魔数/typeCode 校验拒绝（A 模型语义：拒绝而非适配）。typeCode/keyCode/valueType
+ * 码值自本版本起纳入「不得复用、不得改义」铁律；清单变更走 manifestVersion 对齐 + 客户端同步升级。
  * 该二进制路径与 JsonSerializer/JsonBatchSerializer 并存——JSON 路径继续服务社交/网关层，互不影响。
  * 中英双语注释遵循仓库规范。
  * @internal 引擎内部实现，非公开 API。Engine-internal implementation, not part of the public API.
  */
 final class BinaryBatchSerializer implements BatchSerializerInterface
 {
-    /** 批量包魔数：'NX' + 协议版本字节。 Batch magic: 'NX' + protocol version. */
-    private const MAGIC = "\x4e\x58\x00\x01";
+    /** 批量包魔数：'NX' + 协议版本字节（v2 首版正式线上形态，一次切换不留 v1——ADR-030）。 Batch magic: 'NX' + protocol version (v2 first shipped form; one-shot cut, no v1 — ADR-030). */
+    private const MAGIC = "\x4e\x58\x00\x02";
 
     // 值类型码。 Value-type codes (1 byte each).
     private const T_NULL = 0x00;
@@ -42,6 +45,8 @@ final class BinaryBatchSerializer implements BatchSerializerInterface
     private const T_LIST = 0x05;
     private const T_POS = 0x06;
     private const T_EMPTY_STRING = 0x07;
+    /** type 字段专用编码：payload 为 1B typeCode（词表 ProtocolVocabulary.typeCode 分配,不复用不改义）。 Type-only code: 1B typeCode payload (vocabulary-allocated; never reused or redefined). */
+    private const T_TYPE_CODE = 0x08;
     private const T_TRUE = 0xF0;
     private const T_FALSE = 0xF1;
 
@@ -128,8 +133,8 @@ final class BinaryBatchSerializer implements BatchSerializerInterface
             throw new ProtocolException(sprintf('未知帧类型: %s。Unknown frame type: %s.', $message->type, $message->type));
         }
 
-        // 固定字段段：type(必)、requestId(有值)、timestamp(可选开启且有值)
-        $fixed = $this->encString(self::K_TYPE, $message->type);
+        // 固定字段段：type(必,1B typeCode——ADR-030 明文上行退役)、requestId(有值)、timestamp(可选开启且有值)
+        $fixed = pack('nCC', self::K_TYPE, self::T_TYPE_CODE, $typeCode);
         $fieldCount = 1;
         if ($message->requestId !== null) {
             $fixed .= $this->encString(self::K_REQUEST_ID, $message->requestId);
@@ -173,8 +178,17 @@ final class BinaryBatchSerializer implements BatchSerializerInterface
             $offset += self::FIELD_SLOT;
 
             if ($keyCode === self::K_TYPE) {
-                $type = $this->decString($bytes, $offset, $valueType);
-                $offset += $this->stringByteLen($bytes, $offset, $valueType);
+                // type 恒为 T_TYPE_CODE 1B 码（ADR-030 一次切,明文编码已退役）
+                if ($valueType !== self::T_TYPE_CODE) {
+                    throw new DecodeException('type 字段编码非法（应 0x08 TYPE_CODE）。Illegal type field encoding (expected 0x08 TYPE_CODE).');
+                }
+                $this->need($bytes, $offset, 1);
+                $decodedType = $this->vocab->typeName(ord($bytes[$offset]));
+                if ($decodedType === null) {
+                    throw new DecodeException(sprintf('未知 typeCode: %d。Unknown typeCode: %d.', ord($bytes[$offset]), ord($bytes[$offset])));
+                }
+                $type = $decodedType;
+                $offset += 1;
                 continue;
             }
             if ($keyCode === self::K_REQUEST_ID) {
