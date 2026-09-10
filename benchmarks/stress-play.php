@@ -185,7 +185,7 @@ for ($i = 1; $i <= $clients; ++$i) {
             continue;
         }
         drillWsSend($gw, drillSocialFrame('auth', "play:{$name}:" . $attempt, [
-            'username' => $name, 'password' => 'secret', 'mapId' => $mapIdList[$i % count($mapIdList)], 'version' => 1,
+            'username' => $name, 'password' => 'secret', 'mapId' => $mapIdList[$i % count($mapIdList)], 'version' => 2,
         ]));
         $failed503 = false;
         while (microtime(true) < $authDeadline) {
@@ -231,7 +231,7 @@ for ($i = 1; $i <= $clients; ++$i) {
     }
     stream_set_blocking($map, false);
     stream_set_blocking($gw, false);
-    drillWsSend($map, frameMap('auth', ['token' => $token, 'version' => 1], "map-auth:{$name}"), 0x2);
+    drillWsSend($map, frameMap('auth', ['token' => $token, 'version' => 2], "map-auth:{$name}"), 0x2);
 
     $idx = count($bots);
     $bots[$idx] = [
@@ -287,7 +287,7 @@ $attachTo = static function (int $idx, string $wsAddr, string $token, string $ma
         return false;
     }
     stream_set_blocking($map, false);
-    drillWsSend($map, frameMap('auth', ['token' => $token, 'version' => 1], 'att:' . $bots[$idx]['name'] . ':' . $mapId), 0x2);
+    drillWsSend($map, frameMap('auth', ['token' => $token, 'version' => 2], 'att:' . $bots[$idx]['name'] . ':' . $mapId), 0x2);
     $bots[$idx]['map'] = $map;
     $bots[$idx]['mapBuf'] = '';
     $bots[$idx]['mapAuthed'] = false;

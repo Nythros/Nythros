@@ -97,41 +97,51 @@ Redis 键（serviceId 如 \`map-1#ch-1\`）：
 
 ## 6. 容量压测（stress-hotzone / stress-rooms）
 
-两个压测脚本位于 \`benchmarks/\`，用法见脚本头注释。热区压测以线缆级 \`world:tick_rate\` 帧观测
-区域密度降频的**降-升往返**；房间压测以 \`room:spawn\`/`room:aoe` 施压并观测帧率扇出。
+三个压测脚本位于 \`benchmarks/\`，用法见脚本头注释。热区压测以线缆级 \`world:tick_rate\` 帧观测
+区域密度降频的**降-升往返**；房间压测以 \`room:spawn\`/`room:aoe` 施压并观测帧率扇出；连接规模压测
+（\`stress-map.php\`）以真实 WS 链路阶梯加压，并采样服务端 maps worker 的 CPU/RSS。
+
+> 2026-09 采样器修正：三个压测的服务端采样曾按 cmdline 匹配 `start-maps.php` 而命中 Workerman
+> **master**（不承载连接，CPU/RSS 恒平），且 jiffies 字段因 comm 含空格而错位——旧档「CPU avg 0%」
+> 「RSS ≈37MB 恒定」皆源于此。现改为「master 的 worker 子进程」求和 + 从最后一个 `)` 起解析
+> jiffies + 首末累计差分算率；本节表格为修正后重测。
 
 ### 6.1 热区混战（stress-hotzone，格子密度档位 3:1/8:2/0:4）
 
-| 规模 | 带宽/客户端 | 帧率/客户端 | attack→hit p50/p95 | 降档观测 | 回温 |
-|---|---|---|---|---|---|
-| N=10 | 1303 B/s | 25.5 f/s | 24ms / 27ms | max divisor=4 | ✅ 回 1 |
-| N=30 | 2932 B/s | 60.6 f/s | 43ms / 49ms | max divisor=4 | ✅ 回 1 |
-| N=60 | 3822 B/s | 79.4 f/s | 42ms / 51ms | max divisor=4 | ✅ 回 1 |
+| 规模 | 带宽/客户端 | 帧率/客户端 | attack→hit p50/p95 | 降档观测 | 服务端 CPU avg/max | RSS max |
+|---|---|---|---|---|---|---|
+| N=30 | 1553 B/s | 43.6 f/s | 53ms / 60ms | max divisor=4 | 3% / 4% | 100 MB |
+| N=60 | 2469 B/s | 71.4 f/s | 37ms / 41ms | max divisor=4 | 4% / 7% | 103 MB |
+
+（2026-09 重测：协议 v2 帧压缩后带宽较旧档显著下降；CPU/RSS 为 4 个 maps worker 求和口径。）
 
 解读（WSL2 开发机实测，形态供参考，绝对值以目标硬件复测为准）：
 
-- **带宽/客户端随 N 次线性增长**（1157→2932→3822），显著低于 O(N) 理论值——因为聚格密度越高档位
-  越深（divisor 4），移动广播节流把 O(N²) 扇出的增长压平了。60 人聚团时每客户端 ≈3.8KB/s 下行，
-  100 人聚团外推 ≈6-8KB/s，千兆网卡支撑 **万级同时在线客户端下行** 无压力。
+- **带宽/客户端随 N 次线性增长**（1553→2469），显著低于 O(N) 理论值——因为聚格密度越高档位
+  越深（divisor 4），移动广播节流把 O(N²) 扇出的增长压平了。60 人聚团时每客户端 ≈2.5KB/s 下行，
+  按同档位外推 100 人 ≈4-5KB/s，千兆网卡支撑 **万级同时在线客户端下行** 无压力。
 - **降-升往返自动完成**：tick_rate 时间线呈现 1→2→4（聚格）→…→1（散开+滞回 5s）——双向滞回防抖
   符合设计；边界处 1↔2 振荡是 bot 随机走位跨越格界的真实行为。
-- **延迟稳定**：p50 24-43ms（attack→hit 全链路含服务器 tick 粒度），p95 ≤51ms——降档到 5Hz 下
+- **延迟稳定**：p50 37-53ms（attack→hit 全链路含服务器 tick 粒度），p95 ≤60ms——降档到 5Hz 下
   攻击结算仍随请求到达即时结算（事件驱动），p95 未随规模恶化。
+- **单 worker 余量充足**：60 人混战仅占单核约 7%（上限），4 个 maps worker 求和后仍为个位数百分比。
 
 ### 6.2 房间容量（stress-rooms，30Hz 房间 tick，每房 6 bot + 周期 spawn/AoE）
 
-| 规模 | 带宽/客户端 | 帧率/客户端 | 备注 |
-|---|---|---|---|
-| M=5 房（30 bot） | 4857 B/s | 100.7 f/s | 正常 |
-| M=15 房（60 bot） | 6204 B/s | 128.8 f/s | 正常；RSS ≈37MB 恒定 |
+| 规模 | 带宽/客户端 | 帧率/客户端 | 服务端 CPU avg/max | RSS max |
+|---|---|---|---|---|
+| M=15 房（90 bot） | 3522 B/s | 106.4 f/s | 4% / 6% | 107 MB |
+
+（2026-09 重测；旧档「M=15 房 6204 B/s / RSS ≈37MB」的 RSS 是 master 进程值，修正后为 worker 求和。）
 
 ### 6.3 发现与限制
 
 - **网关登录限速**：\`run-worker.php:309\` 的 \`SimpleTokenBucket(refillPerSecond: 10, capacity: 20)\`
   使并发认证在 ~60 个后阻塞（压测实测 ready=60/90 封顶）——这是登录通道的保护性限速，批量开服
   场景（开新副本潮）需调大容量或改用按连接限速。
-- **CPU 采样**：\`/proc\` jiffies 求和口径在低负载下分辨率不足（10-60 bot 均 avg 0%），CPU 容量
-  曲线需在目标硬件以更高密度复测；RSS 恒定 ≈37MB（无泄漏迹象）。
+- **CPU 采样（2026-09 已修）**：旧口径按 cmdline 命中 Workerman **master**（不承载连接→CPU 恒 0%、
+  RSS 恒平 37MB），叠加 jiffies 字段因 comm 含空格错位——并非「低负载分辨率不足」。现三压测统一
+  改采 worker 子进程 + 最后 `)` 起解析 + 首末累计差分；修正后 60 人混战实测 CPU 4-7%、RSS 100-107MB。
 - **进程预算层**：预算顺延（deferred）信号已接入心跳指标（rooms/roomsDeferred），本次压测
   未观测到持续顺延（15 房间 30Hz 余量充足）——预算层的降档验证需要更高密度（30+ 活跃房间）。
 
@@ -143,7 +153,31 @@ Redis 键（serviceId 如 \`map-1#ch-1\`）：
 - 内存与网卡均为次要项：单 worker RSS ≈40-100MB，32GB 富余；带宽按「每客户端 × 在线数 × 2 倍
   冗余」估算，千兆起。
 - 复测清单：在目标硬件以 stress-hotzone N=60/100/150 + stress-rooms M=30/60 重跑本节表格，
-  以实测 CPU% 曲线（需修复 jiffies 采样分辨率或改用外部监控）标定单 worker 容量天花板。
+  以实测 CPU% 曲线标定单 worker 容量天花板（jiffies 采样已修复，见 §6.3）；连接规模上限参考 §6.5。
+
+### 6.5 连接规模标定（stress-map，真实 WS 链路阶梯加压）
+
+2026-09 新增。口径：`stress-map.php --clients=N --seconds=15 --json`，客户端按 1 move/s 在走廊
+ping-pong 走位（高互见密度），服务端采样 maps worker 的 CPU/RSS（修正后口径，见 §6.3）。
+四档阶梯每档冷启动服务栈；「每连接」= 当档总增量 ÷ 连接数。
+
+| 连接数 | 每连接 CPU（单核%） | 每连接内存（增量） | 测量期 P50 / P99 帧间隔 | 服务端 CPU 合计 |
+|---|---|---|---|---|
+| 50 | 0.32% | ~79 KB | 59 / 80 ms | 16% |
+| 100 | 0.33% | ~16 KB（预热栈边际；冷栈 ~300 KB 含 JIT/预热） | 58 / 80 ms | 33% |
+| 200 | 0.36–0.42% | ~107 KB | 55 / 128 ms | 73–84% |
+| 400 | 0.38–0.46% | ~336 KB | 54 / 293–1163 ms ⚠️ | 150–184% |
+
+解读与边界：
+
+- **每连接 CPU 0.32–0.46%/核**（本负载形态），四档基本线性——单 worker 在 1 move/s + 全互见走廊
+  负载下，**约 200 连接/worker 时已近饱和**（CPU ~75%/核、P99 明显上升），~100 连接/worker
+  （~36% 核）为舒适区。连接数对应的内存随视野扇出增长（~16 KB 空载态 → ~336 KB 高扇出态），
+  与广播缓冲（FrameMerger 槽位 / outbox）正相关。
+- **400 档 P99 劣化（293ms 冷 / 1163ms 热）为**客户端侧饱和信号**：压测客户端是单进程 PHP
+  stream_select（需同时收 30 万+ 帧/s），服务端 CPU 仍有合计 ~2 核余量；更高档位复测需多进程
+  客户端（现有工具边界，记入复测清单）。
+- 归档：`benchmarks/results/conn-scale-{50,100,200,400}.json`（冷栈）、`conn-warm-*.json`（预热栈）。
 
 ## 7. 长跑（soak）与故障矩阵演练
 
@@ -192,8 +226,9 @@ proctitle 双形态全树杀防「只杀 worker 被 master 重生」假绿）。
 | 热路径 IO | tick 文件 IO 客户端引用 | =0（静态）；`listener_error_total` 增速 ≈0（运行期） | `composer io-free` + Prometheus |
 | 消息归因 | `network.dispatch_ms` 各桶 | 任何消息类型不越 32ms 桶（越界即现形定位） | perf-stats §3.2 键族 |
 | 登录吞吐 | 单 gateway 进程 | ≥45/s（cost 9 = 22.3ms 实测 WSL；调 cost 8 ≈93/s） | security.md §2 三级旋钮 |
-| 房间容量 | 30Hz × 6 人 + spawn/AoE | 15 房无顺延（RSS ≈37MB 恒定）；上限以 30/60 房复测标定 | `stress-rooms`（§6.2/§6.4） |
-| 热区扇出 | 60 人聚格带宽/客户端 | < 4KB/s（密度降档把 O(N²) 压平） | `stress-hotzone`（§6.1） |
+| 房间容量 | 30Hz × 6 人 + spawn/AoE | 15 房（90 bot）无顺延：CPU avg 4%/max 6%、worker 求和 RSS 107MB；上限以 30/60 房复测标定 | `stress-rooms`（§6.2/§6.4） |
+| 热区扇出 | 60 人聚格带宽/客户端 | < 4KB/s（实测 v2 协议下 2.5KB/s；密度降档把 O(N²) 压平） | `stress-hotzone`（§6.1） |
+| 连接规模 | 每连接 CPU / 内存（1 move/s 走廊负载） | 0.32–0.46% 核 / 16–336 KB；单 worker ~200 连接近饱和、~100 为舒适区 | `php benchmarks/stress-map.php --clients=N --seconds=15 --json`（§6.5） |
 | 导出延迟 | `nythros_perf_gauge{service="storage-exporter",metric="backlog"}` | < 5000 持续 5min 告警；Stream MAXLEN 100k 双保险丝 | Prometheus + fault-drill exporter 场景 |
 | 长跑稳定 | RSS 斜率 / dropped / auth | 0.000 / 0 / 100%（24h 实测 1416 波全过） | `soak-map` + 每小时巡检脚本 |
 | 容错 | 故障矩阵四场景 | `RESULT: PASS`（redis/mysql/kill9/exporter） | `php benchmarks/fault-drill.php` |

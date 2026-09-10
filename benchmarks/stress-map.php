@@ -57,6 +57,63 @@ $clients = max(1, $opts['clients']);
 $seconds = max(1, $opts['seconds']);
 $stats = ['frames' => 0, 'bytes' => 0, 'authOk' => 0, 'peakFps' => 0.0, 'windowFrames' => 0, 'windowAt' => 0.0];
 $stats['windowAt'] = microtime(true);
+
+/**
+ * 服务端进程采样（maps worker 的 RSS 求和 + jiffies 求和）：每连接内存标定的观测侧。
+ * **采样对象修正（2026-09 实测根因）**：旧口径按 cmdline 含 `start-maps.php` 匹配，命中的是
+ * Workerman **master**（不承载连接，CPU/RSS 恒平）——这正是 §6.3「CPU 恒 0%/RSS 恒定」的真相
+ * （此前误判为 jiffies 分辨率不足）。真实负载在 **worker 子进程**（标题 `worker process ... websocket://`），
+ * 故改为「master 的子进程」求和；jiffies 解析同时从最后一个 ')' 起切分（comm 含空格不错位），
+ * CPU 用首末累计差分（跨全窗，低负载也有分辨率）。
+ * Server-process sampling (maps workers' RSS + jiffies): the observation side for per-connection memory.
+ * Sample-target fix (2026-09 root cause): the old matcher (`start-maps.php` in cmdline) hit the Workerman
+ * MASTER (carries no connections, flat CPU/RSS) — the true story behind §6.3's "CPU always 0% / RSS constant"
+ * (previously misread as jiffy resolution). Real load lives in the worker children (`worker process ...
+ * websocket://`), so we sum those; jiffies are parsed after the last ')' (spaces in comm cannot misalign),
+ * and CPU uses the first/last cumulative delta (sub-jiffy resolution over the whole window).
+ *
+ * @return array{pids: list<int>, jiffies: int, rssKb: int}
+ */
+$sampleServer = static function (): array {
+    $masterPids = [];
+    foreach (glob('/proc/[0-9]*/cmdline') as $cmdlineFile) {
+        $cmd = @file_get_contents($cmdlineFile);
+        if ($cmd !== false && strpos($cmd, 'start-maps.php') !== false) {
+            $masterPids[(int) basename(dirname($cmdlineFile))] = true;
+        }
+    }
+
+    $jiffies = 0;
+    $rssKb = 0;
+    $pids = [];
+    foreach (glob('/proc/[0-9]*/stat') as $statFile) {
+        $stat = @file_get_contents($statFile);
+        if ($stat === false) {
+            continue;
+        }
+        $rp = strrpos($stat, ')');
+        if ($rp === false) {
+            continue;
+        }
+        $fields = explode(' ', substr($stat, $rp + 2));
+        $ppid = (int) ($fields[1] ?? 0);
+        if (!isset($masterPids[$ppid])) {
+            continue;
+        }
+        $pid = (int) basename(dirname($statFile));
+        $pids[] = $pid;
+        $jiffies += (int) ($fields[11] ?? 0) + (int) ($fields[12] ?? 0); // utime+stime utime+stime
+        $status = @file_get_contents(sprintf('/proc/%d/status', $pid));
+        if ($status !== false && preg_match('/VmRSS:\s+(\d+) kB/', $status, $m)) {
+            $rssKb += (int) $m[1];
+        }
+    }
+    sort($pids);
+
+    return ['pids' => $pids, 'jiffies' => $jiffies, 'rssKb' => $rssKb];
+};
+// 建链**前**的基线采样：每连接内存 = (运行末 RSS − 基线 RSS) / 连接数。Baseline sample taken before connecting.
+$serverBefore = $sampleServer();
 $latencyHist = [];
 
 /**
@@ -108,8 +165,8 @@ for ($i = 1; $i <= $clients; ++$i) {
         'type' => 'auth',
         'requestId' => "stress:{$name}",
         'timestamp' => microtime(true),
-        'version' => 1,
-        'payload' => ['username' => $name, 'password' => 'secret', 'mapId' => $mapIdList[$i % count($mapIdList)], 'version' => 1],
+        'version' => 2,
+        'payload' => ['username' => $name, 'password' => 'secret', 'mapId' => $mapIdList[$i % count($mapIdList)], 'version' => 2],
     ], JSON_UNESCAPED_UNICODE));
 
     $token = null;
@@ -142,7 +199,7 @@ for ($i = 1; $i <= $clients; ++$i) {
         continue;
     }
     stream_set_blocking($map, false);
-    drillWsSend($map, frameMap('auth', ['token' => $token, 'version' => 1], "map-auth:{$name}"), 0x2);
+    drillWsSend($map, frameMap('auth', ['token' => $token, 'version' => 2], "map-auth:{$name}"), 0x2);
     // 真实负载模型：客户端按索引落到 4 条对角走廊之一（离散走位 → AOI 视野受限，不再全图互见），
     // 走廊内 ping-pong 折返（settle-moves 步折返，保持有界且持续产生视野差分）。
     // The realistic-load model: clients take one of 4 diagonal corridors by index (dispersed walking limits the
@@ -226,6 +283,14 @@ foreach ($conns as $c) {
     fclose($c['stream']);
 }
 
+// 运行末采样：每连接内存（RSS 增量/连接数）+ 累计口径 CPU%（首末 jiffies 差分，低负载不归零）。
+// End sample: per-connection memory (RSS delta / connections) + cumulative CPU% (first/last jiffy delta).
+$serverAfter = $sampleServer();
+$rssPerConnKb = $stats['authOk'] > 0 ? (($serverAfter['rssKb'] - $serverBefore['rssKb']) / $stats['authOk']) : 0.0;
+$cpuPct = ($serverAfter['pids'] !== [] && $serverBefore['pids'] === $serverAfter['pids'])
+    ? (($serverAfter['jiffies'] - $serverBefore['jiffies']) / 100.0) / $elapsed * 100.0
+    : 0.0;
+
 $fps = round($stats['frames'] / $elapsed, 1);
 $p50 = $percentile(0.5);
 $p90 = $percentile(0.9);
@@ -245,12 +310,29 @@ if ($opts['json']) {
         'peakFps' => round($stats['peakFps'], 1),
         'latencyMs' => ['P50' => round($p50, 1), 'P90' => round($p90, 1), 'P99' => round($p99, 1), 'samples' => array_sum($latencyHist)],
         'p99' => round($p99, 1),
+        'server' => [
+            'rssBeforeKb' => $serverBefore['rssKb'],
+            'rssAfterKb' => $serverAfter['rssKb'],
+            'rssPerConnKb' => round($rssPerConnKb, 1),
+            'cpuPct' => round($cpuPct, 2),
+            'cpuPctPerConn' => $stats['authOk'] > 0 ? round($cpuPct / $stats['authOk'], 4) : 0.0,
+            'pids' => $serverAfter['pids'],
+        ],
     ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) . "\n";
     exit(0);
 }
 
 echo sprintf("客户端=%d auth=%d 建链失败=%d fps=%.1f(peak %.1f) 帧=%d bytes=%.1fKB\n", $clients, $stats['authOk'], $failed, $fps, $stats['peakFps'], $stats['frames'], $stats['bytes'] / 1024);
 echo sprintf("延迟ms P50=%.1f P90=%.1f P99=%.1f 样本=%d\n", $p50, $p90, $p99, array_sum($latencyHist));
+echo sprintf(
+    "服务端(maps %d worker)：RSS %.1f→%.1f MB（每连接 %.1f KB） CPU 累计 %.2f%%（每连接 %.4f%%）\n",
+    count($serverAfter['pids']),
+    $serverBefore['rssKb'] / 1024,
+    $serverAfter['rssKb'] / 1024,
+    $rssPerConnKb,
+    $cpuPct,
+    $stats['authOk'] > 0 ? $cpuPct / $stats['authOk'] : 0.0,
+);
 
 /**
  * 自测：ws 缓冲帧解析器（分片到达/长帧/多帧粘包），无网络依赖。解析器本体已上收 drill-harness

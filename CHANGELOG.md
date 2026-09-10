@@ -162,7 +162,7 @@
 
 - **协议 v2 一次切换：type 明文→1B 词表码 + 清单协商地基（[引擎/Protocol + 框架/Social + demo/装配 + client-js]，
   ADR-030，⚠️ breaking）**：线字节审计发现每帧传 14-16B 明文类型名（词表 typeCode 早已存在却只用于校验、
-  从未上线——「枚举压缩」名不副实）。v2 定稿为**唯一线上形态**：魔数 `NX `、type 字段 0xF3 +
+  从未上线——「枚举压缩」名不副实）。v2 定稿为**唯一线上形态**：魔数 `NX\0\x02`、type 字段 0xF3 +
   新 valueType 0x08 TYPE_CODE + 1B 码值；**v1 就此退役，旧魔数/明文 type 包一律 `DecodeException` 拒绝**
   （0.x 无外部存量窗口执行一次切，不留双栈）。协商地基补全：auth `version` 存下并经 auth_ok 回显，新增
   `manifestVersion`（双码表 CRC32，`MapCodec::manifestVersion()`，PayloadKey 84→85）——客户端与编译期生成物
@@ -205,6 +205,24 @@
   目录扫描仅此一处。其余解码器结构审查均严格：Msgpack 每次读字节前 `need()` 验长、
   Protobuf 主循环 `offset < end` 收口且 varint 带显式截断异常、JsonBatch 依赖 json_decode
   原生报错——静默补 null 类缺陷在协议层已闭环。
+
+### Fixed
+
+- **压测服务端采样器三连修 + 连接规模标定落地（[benchmarks/ + docs]，「容量口径」从错到准）**：
+  ① 采样对象修正——`stress-map/hotzone/rooms` 旧口径按 cmdline 匹配 `start-maps.php`，命中的是
+  Workerman **master**（不承载连接，CPU/RSS 恒平）：这正是历史档「CPU avg 0%」「RSS ≈37MB 恒定」
+  的真相（此前误判为「jiffies 分辨率不足」）。改采 master 的 **worker 子进程**；② jiffies 解析修正——
+  comm 含空格导致 `/proc/PID/stat` 字段错位，改从最后一个 `)` 起切分；③ 精度修正——逐样本 jiffies
+  差分在 clk_tck=100 下低负载必为 0%，改**首末累计差分**跨全运行窗算率。修正后 60 人混战实测
+  CPU 4-7%/RSS 100-107MB（旧档全为 0%/37MB）。
+- **stress-map 新增服务端采样与 `--json` 服务端段**（每连接 CPU/内存口径）：并新增
+  **§6.5 连接规模标定**——50/100/200/400 四档冷栈阶梯实测：每连接 CPU 0.32-0.46% 核、内存
+  16-336KB（随视野扇出增长），单 worker ~200 连接近饱和（~75% 核、P99 上升）、~100 为舒适区；
+  400 档 P99 劣化的主因是单进程压测客户端自身饱和（服务端仍有 ~2 核余量）。原始数据归档
+  `benchmarks/results/conn-{scale,warm}-*.json` 与 `hotzone-*.txt`；§6.1/§6.2/§8 数字全部按修正
+  口径重测更新（协议 v2 后 60 人聚格带宽 3822→2469 B/s）。
+- **压测工具链协议版本升 v2**：`stress-map/stress-play/drill-harness` 的 auth 帧 `version` 1→2
+  （v2 一次切后旧值会被 min-version 守卫拒绝）；`stress-rooms` 修 `$state['conn']` 空键访问。
 
 ### Fixed
 

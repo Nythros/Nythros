@@ -71,26 +71,43 @@ function roomOf(int $botIndex): array
 function sampleServer(): void
 {
     $s = &$GLOBALS['stress'];
+    // 采样对象修正（与 stress-map/hotzone 同源，2026-09）：按 `start-maps.php` 匹配会命中空闲 master
+    // （CPU/RSS 恒平）；真实负载在 master 的 worker 子进程，且 jiffies 需从最后一个 ')' 起解析（comm 含空格）。
+    // Target fix (same as stress-map/hotzone, 2026-09): matching `start-maps.php` hits the idle master;
+    // real load lives in its worker children, and jiffies must be parsed after the last ')'.
+    $masterPids = [];
+    foreach (glob('/proc/[0-9]*/cmdline') as $cmdlineFile) {
+        $cmd = @file_get_contents($cmdlineFile);
+        if ($cmd !== false && strpos($cmd, 'start-maps.php') !== false) {
+            $masterPids[(int) basename(dirname($cmdlineFile))] = true;
+        }
+    }
+
     $jiffies = 0;
     $rssKb = 0;
     $pids = [];
-    foreach (glob('/proc/[0-9]*/cmdline') as $cmdlineFile) {
-        $cmd = @file_get_contents($cmdlineFile);
-        if ($cmd === false || strpos($cmd, 'start-maps.php') === false) {
+    foreach (glob('/proc/[0-9]*/stat') as $statFile) {
+        $stat = @file_get_contents($statFile);
+        if ($stat === false) {
             continue;
         }
-        $pid = (int) basename(dirname($cmdlineFile));
-        $pids[] = $pid;
-        $stat = @file_get_contents("/proc/$pid/stat");
-        if ($stat !== false) {
-            $fields = explode(' ', $stat);
-            $jiffies += (int) ($fields[13] ?? 0) + (int) ($fields[14] ?? 0);
+        $rp = strrpos($stat, ')');
+        if ($rp === false) {
+            continue;
         }
-        $status = @file_get_contents("/proc/$pid/status");
+        $fields = explode(' ', substr($stat, $rp + 2));
+        if (!isset($masterPids[(int) ($fields[1] ?? 0)])) {
+            continue;
+        }
+        $pid = (int) basename(dirname($statFile));
+        $pids[] = $pid;
+        $jiffies += (int) ($fields[11] ?? 0) + (int) ($fields[12] ?? 0); // utime+stime utime+stime
+        $status = @file_get_contents(sprintf('/proc/%d/status', $pid));
         if ($status !== false && preg_match('/VmRSS:\s+(\d+) kB/', $status, $m)) {
             $rssKb += (int) $m[1];
         }
     }
+    sort($pids);
     $t = microtime(true);
     $cpu = 0.0;
     $prev = $s['samples'] === [] ? null : $s['samples'][count($s['samples']) - 1];
@@ -99,7 +116,6 @@ function sampleServer(): void
         $dj = $jiffies - $prev['jiffies'];
         $cpu = $dt > 0 ? ($dj / 100.0) / $dt * 100.0 : 0.0;
     }
-    sort($pids);
     $s['pids'] = $pids;
     $s['samples'][] = ['t' => $t, 'jiffies' => $jiffies, 'cpu' => $cpu, 'rssMb' => round($rssKb / 1024, 1)];
 }
@@ -280,10 +296,22 @@ function startPhases(): void
 function summarize(): void
 {
     $s = &$GLOBALS['stress'];
+    // CPU 累计口径（与 stress-map/hotzone 同源修法）：逐样本 jiffies 差分在 clk_tck=100 下低负载必为 0%，
+    // 改首末累计差分跨全运行窗计算。
+    // Cumulative CPU (same fix as stress-map/hotzone): per-sample jiffy deltas read 0 at low load under
+    // clk_tck=100; use the first/last cumulative delta over the whole run instead.
     $cpuValues = array_map(static fn (array $x): float => $x['cpu'], array_slice($s['samples'], 1));
     sort($cpuValues);
-    $cpuAvg = $cpuValues === [] ? 0.0 : array_sum($cpuValues) / count($cpuValues);
     $cpuMax = $cpuValues === [] ? 0.0 : $cpuValues[count($cpuValues) - 1];
+    $cpuAvg = 0.0;
+    if (count($s['samples']) >= 2) {
+        $first = $s['samples'][0];
+        $last = $s['samples'][count($s['samples']) - 1];
+        $span = $last['t'] - $first['t'];
+        if ($span > 0.0) {
+            $cpuAvg = (($last['jiffies'] - $first['jiffies']) / 100.0) / $span * 100.0;
+        }
+    }
     $rssMax = $s['samples'] === [] ? 0.0 : max(array_map(static fn (array $x): float => $x['rssMb'], $s['samples']));
 
     $bytes = $frames = $aoe = 0;
@@ -299,8 +327,8 @@ function summarize(): void
 
     $s['closing'] = true;
     foreach ($s['clients'] as $state) {
-        $state['conn']?->close();
-        $state['social']?->close();
+        ($state['conn'] ?? null)?->close();
+        ($state['social'] ?? null)?->close();
     }
     Timer::add(0.5, static function (): void {
         if (function_exists('posix_kill')) {

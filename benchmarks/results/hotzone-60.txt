@@ -1,0 +1,22 @@
+Workerman[stress-hotzone.php] start in DEBUG mode
+----------------------------------------- WORKERMAN -----------------------------------------
+Workerman/5.2.2         PHP/8.3.33 (JIT on)           Linux/6.6.87.2-microsoft-standard-WSL2
+------------------------------------------ WORKERS ------------------------------------------
+event-loop  proto       user        worker      listen      count       state            
+event       tcp         wen         none        none        1            [OK]            
+---------------------------------------------------------------------------------------------
+Press Ctrl+C to stop. Start success.
+[stress] 聚团混战压测启动：players=60 phase1=25s phase2=12s
+[stress] 启动行为拍（ready=60/60），聚拢到簇心（15,15）
+[stress] PHASE1 聚团混战开始（25s）——观测降档
+[stress] PHASE2 散开开始（12s）——观测回温（滞回后 divisor 应回 1）
+[stress] 带宽/客户端: 2469 B/s   帧率/客户端: 71.4 f/s   combat:hit 总数: 53
+[stress] attack→hit p50: 37ms p95: 41ms   error 帧总数: 0（死怪窗口内攻击被拒属预期）
+[stress] 服务端 CPU%: avg 4% max 7%（单核口径，maps 全 worker 求和）   RSS max: 103 MB
+[stress] 2001 收帧直方图: {"auth_ok":1,"entity_enter":1609,"entity_moved":981,"world:tick_rate":15,"entity_leave":249,"combat:hit":45,"drop:spawned":10,"entity_dead":5,"combat:error":45,"monster:spawned":4}
+[stress] [PASS] 降档观测：max divisor=4
+[stress] [PASS] 回升观测：final divisor=1（滞回后回温）
+[stress] RESULT: PASSED (players=60 maxDivisor=4 finalDivisor=1)
+Workerman[stress-hotzone.php] received signal SIGINT
+Workerman[stress-hotzone.php] stopping
+Workerman[stress-hotzone.php] has been stopped

@@ -91,30 +91,47 @@ function observeTickRate(int $divisor): void
 }
 
 // ── 服务端进程采样（maps worker 全部进程的 CPU%/RSS 求和，单核口径可 >100%） ──
-// ── Server sampling (CPU%/RSS summed across maps-worker processes; single-core scale may exceed 100%) ──
+// 采样对象修正（2026-09）：旧口径匹配 `start-maps.php` 命中 master（不承载连接→CPU/RSS 恒平，
+// 即 §6.3「CPU 恒 0%/RSS 恒定」真相）；改按「master 的 worker 子进程」求和，jiffies 从最后一个 ')' 起解析。
+// ── Server sampling (CPU%/RSS summed across maps workers; single-core scale may exceed 100%) ──
+// Target fix (2026-09): matching `start-maps.php` hit the idle master (the §6.3 "flat CPU/RSS" truth);
+// now sum the master's worker children, parsing jiffies after the last ')'.
 function sampleServer(): void
 {
     $s = &$GLOBALS['stress'];
+    $masterPids = [];
+    foreach (glob('/proc/[0-9]*/cmdline') as $cmdlineFile) {
+        $cmd = @file_get_contents($cmdlineFile);
+        if ($cmd !== false && strpos($cmd, 'start-maps.php') !== false) {
+            $masterPids[(int) basename(dirname($cmdlineFile))] = true;
+        }
+    }
+
     $jiffies = 0;
     $rssKb = 0;
     $pids = [];
-    foreach (glob('/proc/[0-9]*/cmdline') as $cmdlineFile) {
-        $cmd = @file_get_contents($cmdlineFile);
-        if ($cmd === false || strpos($cmd, 'start-maps.php') === false) {
+    foreach (glob('/proc/[0-9]*/stat') as $statFile) {
+        $stat = @file_get_contents($statFile);
+        if ($stat === false) {
             continue;
         }
-        $pid = (int) basename(dirname($cmdlineFile));
-        $pids[] = $pid;
-        $stat = @file_get_contents("/proc/$pid/stat");
-        if ($stat !== false) {
-            $fields = explode(' ', $stat);
-            $jiffies += (int) ($fields[13] ?? 0) + (int) ($fields[14] ?? 0); // utime+stime utime+stime
+        $rp = strrpos($stat, ')');
+        if ($rp === false) {
+            continue;
         }
-        $status = @file_get_contents("/proc/$pid/status");
+        $fields = explode(' ', substr($stat, $rp + 2));
+        if (!isset($masterPids[(int) ($fields[1] ?? 0)])) {
+            continue;
+        }
+        $pid = (int) basename(dirname($statFile));
+        $pids[] = $pid;
+        $jiffies += (int) ($fields[11] ?? 0) + (int) ($fields[12] ?? 0); // utime+stime utime+stime
+        $status = @file_get_contents(sprintf('/proc/%d/status', $pid));
         if ($status !== false && preg_match('/VmRSS:\s+(\d+) kB/', $status, $m)) {
             $rssKb += (int) $m[1];
         }
     }
+    sort($pids);
     $t = microtime(true);
     $cpu = 0.0;
     $prev = $s['samples'] === [] ? null : $s['samples'][count($s['samples']) - 1];
@@ -123,7 +140,6 @@ function sampleServer(): void
         $dj = $jiffies - $prev['jiffies'];
         $cpu = $dt > 0 ? ($dj / 100.0) / $dt * 100.0 : 0.0; // clk_tck=100 clk_tck=100
     }
-    sort($pids);
     $s['pids'] = $pids;
     $s['samples'][] = ['t' => $t, 'jiffies' => $jiffies, 'cpu' => $cpu, 'rssMb' => round($rssKb / 1024, 1)];
 }
@@ -351,10 +367,22 @@ function startPhases(): void
 function summarize(): void
 {
     $s = &$GLOBALS['stress'];
+    // CPU 累计口径（修 §6.3 分辨率缺陷）：逐样本 jiffies 差分在 clk_tck=100 下低负载必然 0%，
+    // 改首末累计差分——cpu = (Σjiffies_end − Σjiffies_start) / 100 / 时长，跨全运行窗累计。
+    // Cumulative CPU (fixes §6.3's resolution defect): per-sample jiffy deltas are structurally 0 at low
+    // load under clk_tck=100; the first/last cumulative delta is used instead.
     $cpuValues = array_map(static fn (array $x): float => $x['cpu'], array_slice($s['samples'], 1));
     sort($cpuValues);
-    $cpuAvg = $cpuValues === [] ? 0.0 : array_sum($cpuValues) / count($cpuValues);
     $cpuMax = $cpuValues === [] ? 0.0 : $cpuValues[count($cpuValues) - 1];
+    $cpuAvg = 0.0;
+    if (count($s['samples']) >= 2) {
+        $first = $s['samples'][0];
+        $last = $s['samples'][count($s['samples']) - 1];
+        $span = $last['t'] - $first['t'];
+        if ($span > 0.0) {
+            $cpuAvg = (($last['jiffies'] - $first['jiffies']) / 100.0) / $span * 100.0;
+        }
+    }
     $rssMax = $s['samples'] === [] ? 0.0 : max(array_map(static fn (array $x): float => $x['rssMb'], $s['samples']));
 
     $bytes = $frames = $hits = $errs = 0;

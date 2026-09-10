@@ -1,0 +1,32 @@
+{
+    "clients": 200,
+    "seconds": 15,
+    "moveMs": 1000,
+    "settleMoves": 0,
+    "authOk": 200,
+    "establishFailed": 0,
+    "frames": 1535557,
+    "bytesKB": 51156.8,
+    "fps": 102368.8,
+    "peakFps": 212726.7,
+    "latencyMs": {
+        "P50": 55.8,
+        "P90": 75.8,
+        "P99": 128.2,
+        "samples": 60766
+    },
+    "p99": 128.2,
+    "server": {
+        "rssBeforeKb": 121248,
+        "rssAfterKb": 142752,
+        "rssPerConnKb": 107.5,
+        "cpuPct": 72.6,
+        "cpuPctPerConn": 0.363,
+        "pids": [
+            571,
+            572,
+            573,
+            574
+        ]
+    }
+}

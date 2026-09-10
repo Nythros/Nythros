@@ -222,8 +222,8 @@ function drillGatewayLogin(DrillConfig $cfg, string $username = '1001', string $
         'type' => 'auth',
         'requestId' => 'drill:' . bin2hex(random_bytes(3)),
         'timestamp' => microtime(true),
-        'version' => 1,
-        'payload' => ['username' => $username, 'password' => $password, 'mapId' => 'map-1', 'version' => 1],
+        'version' => 2,
+        'payload' => ['username' => $username, 'password' => $password, 'mapId' => 'map-1', 'version' => 2],
     ], JSON_UNESCAPED_UNICODE);
     drillWsSend($stream, $payload);
 
