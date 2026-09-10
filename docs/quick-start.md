@@ -189,9 +189,9 @@ php packages/demo/bin/ws-client.php   # 期望输出 [client] received: echo: he
 
 ```text
 1. 登录      客户端 → Social gateway(18285) auth{username,password,mapId}
-              ← auth_ok{uid, token, map:{wsAddress}, team, guild, endpoints:{chat,team}}
+              ← auth_ok{uid, token, map:{wsAddress}, team, guild, endpoints:{chat,team}, version, manifestVersion}
               （token 多 scope；endpoints 携带 chat/team 服务地址，由部署拓扑注入）
-2. 进图      客户端 → Map(18081) 直连 auth{token} → auth_ok{id=1001@…}
+2. 进图      客户端 → Map(18081) 直连 auth{token, version} → auth_ok{id=1001@…, version, manifestVersion}
               （同时社交侧 joinGroup 频道分组）
 3. 攻击      客户端 → attack{targetId=monster-1} → 视野广播 combat:hit{attackerId,targetId,damage,hp}
 4. 死亡      多玩家集火 → 视野广播 entity_dead（怪物 Actor 自清理，尸体攻击得 combat:error invalid_target）

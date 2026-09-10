@@ -67,7 +67,7 @@ namespace Nythros.Client
 
         private const ushort KRequestId = 0xF2, KType = 0xF3;
         private const byte TNull = 0x00, TInt = 0x01, TFloat = 0x02, TString = 0x03, TString32 = 0x04,
-            TList = 0x05, TPos = 0x06, TEmptyString = 0x07, TTrue = 0xF0, TFalse = 0xF1;
+            TList = 0x05, TPos = 0x06, TEmptyString = 0x07, TTypeCode = 0x08, TTrue = 0xF0, TFalse = 0xF1;
         private static readonly byte[] Magic = { 0x4E, 0x58, 0x00, 0x01 }; // "NX\0\x01"
 
         public sealed class NythrosProtocolException : Exception
@@ -99,7 +99,9 @@ namespace Nythros.Client
             using var w = new BinaryWriter(body, Encoding.UTF8, leaveOpen: true);
             var fields = new List<(ushort key, byte type, byte[] data)>();
 
-            fields.Add((KType, TString, EncodeString(frame.Type)));
+            if (!FrameTypes.TryGetValue(frame.Type, out var typeCode) || typeCode > 0xFF)
+                throw new NythrosProtocolException($"未知帧类型 {frame.Type}（未登记进 FrameType 枚举或码值超 255）");
+            fields.Add((KType, TTypeCode, new byte[] { (byte) typeCode }));
             if (frame.RequestId != null) fields.Add((KRequestId, TString, EncodeString(frame.RequestId)));
             foreach (var (key, value) in frame.Payload)
             {
@@ -157,7 +159,7 @@ namespace Nythros.Client
                     return TFloat;
                 case string s:
                     data = EncodeString(s);
-                    return data.Length == 0 ? TEmptyString : (data.Length <= 256 ? TString : TString32);
+                    return data.Length == 0 ? TEmptyString : (data.Length <= 255 ? TString : TString32);
                 case (int x, int y) pos:
                     data = new byte[4];
                     BinaryPrimitives.WriteInt16BigEndian(data.AsSpan(0, 2), (short) x);
@@ -202,8 +204,14 @@ namespace Nythros.Client
                 switch (keyCode)
                 {
                     case KType:
-                        var (t, tUsed) = DecodeValue(bytes, offset, valueType);
-                        frame.Type = (string) t!; offset += tUsed; break;
+                        // v2：type 恒为 1B TYPE_CODE 码值（词表反查），明文编码已退役（ADR-030）
+                        if (valueType != TTypeCode) throw new NythrosProtocolException("type 字段编码非法（应 0x08 TYPE_CODE）");
+                        if (offset + 1 > end) throw new NythrosProtocolException("typeCode 越界");
+                        var code = bytes[offset]; offset += 1;
+                        string? typeName = null;
+                        foreach (var kv in FrameTypes) { if (kv.Value == code) { typeName = kv.Key; break; } }
+                        frame.Type = typeName ?? throw new NythrosProtocolException($"未知 typeCode {code}");
+                        break;
                     case KRequestId:
                         var (r, rUsed) = DecodeValue(bytes, offset, valueType);
                         frame.RequestId = (string) r!; offset += rUsed; break;

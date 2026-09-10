@@ -23,8 +23,8 @@ Unity 侧提供的是**参考实现**：[clients/unity/NythrosClient.cs](https:/
 | 约定 | 内容 |
 |---|---|
 | 双通道 | 网关（18285）JSON 文本帧：登录换 token；Map（18081~18084）二进制批量帧：全部游戏内容 |
-| 批量包布局 | `[4B 魔数 "NX\0\x01"][4B 帧数]{逐帧: [4B 帧长][帧体]}`，长度字段**大端** |
-| 帧体布局 | `[2B 字段数]{逐字段: [2B keyCode][1B valueType][值负载]}`；`type`=0xF3、`requestId`=0xF2 保留键 |
+| 批量包布局 | `[4B 魔数 "NX\0\x02"][4B 帧数]{逐帧: [4B 帧长][帧体]}`，长度字段**大端**（v2 唯一线上形态，ADR-030） |
+| 帧体布局 | `[2B 字段数]{逐字段: [2B keyCode][1B valueType][值负载]}`；`type`=0xF3（valueType 0x08 TYPE_CODE，**1B 码值非明文**）、`requestId`=0xF2 保留键 |
 | 字节序 | 长度大端；int64/double **小端**（PHP `pack('q'/'d')` 机器序）；POS 两个 int16 **大端** |
 | 码表权威 | 帧名/字段名→码值由 `FrameType::codeMap()` / `PayloadKey::codeMap()` 生成，**一经发布不得复用改义** |
 

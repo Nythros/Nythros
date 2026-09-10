@@ -185,9 +185,9 @@ sequenceDiagram
     C->>GW: auth{username, password, mapId}
     GW->>R: 校验账号 / 查位置快照
     GW-->>R: 签发多 scope token（map/chat/team 各消费己 scope）
-    GW-->>C: auth_ok{token, map:{wsAddress}, endpoints:{chat,team}}
+    GW-->>C: auth_ok{token, map, endpoints, version, manifestVersion}
     C->>M: 直连 auth{token}（map scope 一次性、防重放）
-    M-->>C: auth_ok{entityId} + 视野全量 entity_enter
+    M-->>C: auth_ok{entityId, version, manifestVersion} + 视野全量 entity_enter
     loop 对局
         C->>M: attack{targetId}（前置校验：目标/距离/冷却）
         M-->>C: combat:hit / entity_dead / drop:spawned（视野广播）

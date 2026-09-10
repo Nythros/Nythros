@@ -190,7 +190,7 @@ gateway(JSON)                     map-1 进程                        map-2 进�
   │     map{wsAddress,mapId,channelId}}（SocialService::handleMapEnter 选频道+重签 token）│
   │ close() 旧 Map 连接 ──────────→ detach：closeConnection 清理路径导出转移票据 │
   │ 新地址 ws 握手 + auth{token} ──────────────────────────────────→ attach：原子消费票据重建实体
-  │ ← auth_ok {uid, id}                                                    │
+  │ ← auth_ok {uid, id, version, manifestVersion}                          │
   │ map:join{mapId,channelId}（社交层更新会话与位置快照）                    │
 ```
 

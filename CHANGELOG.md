@@ -173,7 +173,9 @@
   改 wire 必两端同步重生成。验证链：协议测 250 全绿 + node 19/19 + **E2E `verify-phase5` 11/11**
   （含 Map 二进制 auth 与战斗直连；`verify-combat` 前置在 v1 对照组同样失败，证实与本改动无关的环境因素）。
   迁移：客户端 `protocolVersion` 缺省升 2；生产建议 `NYTHROS_MIN_CLIENT_VERSION=2`；自研客户端按
-  protocol.md §2-§4/§7 新表接入；后续演进（INT varint、keyCode 1B、EVENT_BUNDLE 位图）各走独立 ADR。
+  protocol.md §2-§4/§7 新表接入——**Unity 参考实现 `clients/unity/NythrosClient.cs` 已同步 v2**
+  （MAGIC 0x02、type 编/解走 1B TYPE_CODE、顺带修正 STRING 边界 256→255 预存笔误）；
+  后续演进（INT varint、keyCode 1B、EVENT_BUNDLE 位图）各走独立 ADR。
 
 ### Performance
 
