@@ -23,7 +23,9 @@ require __DIR__ . '/../vendor/autoload.php';
 use Nythros\Cluster\RedisServiceRegistry;
 use Nythros\Demo\MapChannelFactory;
 use Nythros\Demo\Protocol\MapCodec;
+use Nythros\Framework\Cluster\RedisConnector;
 use Nythros\Framework\Deploy\DeployConfig;
+use Nythros\KernelWorkerman\WorkermanTimer;
 use Nythros\NetworkWorkerman\WorkermanWebSocketServer;
 use Nythros\Security\RedisTokenStore;
 use Nythros\Security\TokenManager;
@@ -39,21 +41,14 @@ if (!is_file($configPath)) {
 $config = DeployConfig::parseYaml((string) file_get_contents($configPath));
 
 // Redis 连接工厂：lazy 建连（Workerman fork 后各 worker 首次使用时各自建立独立连接，避免共享 fd 破坏 Redis 协议）
+// 哨兵 HA（ADR-031）：NYTHROS_REDIS_SENTINELS 配置时经哨兵解析主库；各频道 worker 进程内挂 5s 刷新定时器
+// （主从切换原地重指向 / 失活重连）。未配置 = 直连，行为与接入前一致。
 // Redis connection factory: lazily connected (each forked worker opens its own connection on first use)
+// Sentinel HA (ADR-031): with NYTHROS_REDIS_SENTINELS the master is resolved through sentinels; each channel worker
+// arms a 5s refresh timer (in-place re-pointing on failover, reconnect of dead clients). Unset = direct, unchanged.
 $redisInfo = $config->redis();
-$redisFactory = static function () use ($redisInfo): \Redis {
-    $redis = new \Redis();
-    try {
-        $connected = @$redis->connect($redisInfo['host'], $redisInfo['port'], 1.0);
-    } catch (\Throwable) {
-        $connected = false;
-    }
-    if ($connected !== true) {
-        throw new \RuntimeException(sprintf('[start-maps] fatal: 无法连接 Redis %s:%d', $redisInfo['host'], $redisInfo['port']));
-    }
-
-    return $redis;
-};
+$redisConnector = RedisConnector::fromEnv($redisInfo['host'], $redisInfo['port']);
+$redisFactory = $redisConnector->factory();
 
 // MySQL 连接工厂（归档落库）：lazy 建连（与 Redis 同口径）
 // MySQL connection factory (archive persistence): lazily connected
@@ -92,6 +87,17 @@ foreach ($config->processes() as $processName => $services) {
             scanIntervalSeconds: 2,
             errorSerializer: $serializer,
         );
+        // 主从刷新定时器（仅哨兵模式；每个 worker 进程各挂一份）：切换完成后把本进程 Redis 连接原地重指向新主。
+        // The master/replica refresh timer (Sentinel mode only; one per worker process): re-points this process's
+        // Redis connections at the new master once a failover completes.
+        if ($redisConnector->isSentinelMode()) {
+            $server->onWorkerStart(static function () use ($redisConnector): void {
+                $timer = new WorkermanTimer();
+                $timer->add($redisConnector->refreshIntervalSeconds(), static function () use ($redisConnector): void {
+                    $redisConnector->refresh();
+                }, true);
+            });
+        }
         MapChannelFactory::attachChannel(
             $server,
             $mapId,

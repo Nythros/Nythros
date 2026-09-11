@@ -17,7 +17,7 @@
 关键区分（新模型下已改写）：Redis 不只是「TTL 临时态宿主」——export 模式下它是**会话热状态的权威存储**
 （背包快照无 TTL、attach 恢复首读、崩溃后在线态可复原），MySQL 退居冷归档（报表/回档/Redis 灾难兜底）；
 游戏 worker 进程内因此零 PDO（`composer io-free` 门禁守护）。「Redis 不放永久数据」仅在 mysql 回退
-模式与运维清理策略语境下成立——给 Redis 键配 AOF + 积压/内存治理见 deployment §7。
+模式与运维清理策略语境下成立——给 Redis 键配 AOF + 积压/内存治理见 deployment §8。
 
 ## 2. 存储契约与适配器
 
@@ -114,5 +114,5 @@ echo "schema ok\n";'
 - 把帧级状态写进任何存储（§1 第一行反例）；
 - 绕过 `PersistPipelineInterface` 管线在游戏循环里同步写库/写 Redis（`composer io-free` 门禁拦截）；
 - export 模式下给会话权威键（`nythros:bag:*`）配短 TTL 或指望 MySQL 兜热数据——权威错位；
-  离线长尾的 Redis 内存治理是运维课题（deployment §7），不是热路径设计；
+  离线长尾的 Redis 内存治理是运维课题（deployment §8），不是热路径设计；
 - 用 `findBy` 做高频查询（全表扫描语义——它是仓库辅助，不是索引服务）。

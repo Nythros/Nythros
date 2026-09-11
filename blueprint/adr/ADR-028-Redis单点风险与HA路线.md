@@ -18,12 +18,16 @@ Redis 是全服唯一跨进程事实源：多 scope token、服务注册与发�
   （exit(1) 会引发 master 重启风暴）；Redis 恢复后无需重启即自愈。
 - 网络隔离：Redis 只在内网可达（部署清单见 docs/deployment.md §6）。
 
-**第二期（触发条件后置）：哨兵/集群支持**
+**第二期（已交付，见 [ADR-031](ADR-031-哨兵HA与连接自愈.md)）：哨兵 HA 与连接自愈**
 
-- 触发条件：单实例内存/连接数到达标定上限，或可用性要求提升到"Redis 宕机分钟级自动切换"。
-- 路线：phpredis Sentinel 支持（`Redis::sentinel()` 哨兵发现 + 主从切换重连），
-  连接工厂闭包是唯一改造点（各 store 消费工厂，接口不变）；Lua 原子脚本（token 墓碑/转移票据/
-  拍卖扣款）在主从切换下的语义需专项回归。
+- 交付：`RedisConnector`（哨兵解析 + 连接追踪 + 主变原地重指向 + 失活重连）、`ReplicaBarrier`
+  （经济域权威写 `WAIT 1`）、6 个入口接入 + worker 5s 刷新定时器、开发/演练栈 `deploy/redis-ha/`
+  与端到端切换演练脚本（`failover-drill.sh`）。
+- 实测修正（原「连接工厂闭包是唯一改造点」需补两条，详见 ADR-031 背景表）：
+  ① phpredis **不会**自动重连已断开的连接——存量缺陷「Redis 重启后已建立连接的 worker 永久失联」；
+  ② 故除工厂外还需「连接追踪 + refresh() 重指向/重连」与 worker 侧定时器两处配套。
+- Lua 原子脚本在主从切换下的语义：短 TTL 键族（token 墓碑/位置快照/转移票据）允许失最后写（本 ADR 已记录）；
+  托管资产（货币/背包/邮件/拍卖）以 `ReplicaBarrier` 的 `WAIT 1` 收窄窗口，未及确认的写仍在丢失范围内。
 - 明确不做：客户端分片集群（hash tag 已在 blueprint/12 遗留项记录）。
 
 ## 理由
@@ -35,7 +39,7 @@ Redis 是全服唯一跨进程事实源：多 scope token、服务注册与发�
 ## 影响 / 后果
 
 - 生产部署 checklist 新增 Redis 认证项（docs/deployment.md §6）；
-- 备份与恢复演练（docs/deployment.md §7）覆盖 Redis 持久化选择；
+- 备份与恢复演练（docs/deployment.md §8）覆盖 Redis 持久化选择；
 - 第二期动工时以本 ADR 为基线立实现 ADR。
 
 ## 关联

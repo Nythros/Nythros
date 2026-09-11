@@ -35,6 +35,7 @@ use Nythros\Demo\StaticAuthenticator;
 use Nythros\Demo\WorkermanHubTransport;
 use Nythros\Event\SimpleEventBus;
 use Nythros\Framework\Auth\ThrottledAuthenticator;
+use Nythros\Framework\Cluster\RedisConnector;
 use Nythros\Framework\Leaderboard\RedisLeaderboardStore;
 use Nythros\Framework\Server\ConnectionRegistry;
 use Nythros\Framework\Social\GuildStore;
@@ -44,6 +45,7 @@ use Nythros\Framework\Social\LocationStore;
 use Nythros\Framework\Social\RedisFriendStore;
 use Nythros\Framework\Social\RedisTeamStore;
 use Nythros\Framework\Social\SocialService;
+use Nythros\KernelWorkerman\WorkermanTimer;
 use Nythros\Network\SimpleTokenBucket;
 use Nythros\NetworkWorkerman\WorkermanWebSocketServer;
 use Nythros\Protocol\Frame;
@@ -184,37 +186,13 @@ stream_set_write_buffer(STDOUT, 0);
 // Connect failures use throw instead of exit(1): the exception propagates up into WorkermanWebSocketServer's catch Throwable
 // fallback (log + 500 response), so the worker survives and recovers once Redis returns — no restart needed; exit(1) would make
 // the master restart the worker forever (restart storm).
-$redisFactory = static function () use ($options): \Redis {
-    $redis = new \Redis();
-    try {
-        $connected = @$redis->connect($options['redisHost'], $options['redisPort'], 1.0);
-    } catch (\Throwable) {
-        $connected = false;
-    }
-    if ($connected !== true) {
-        throw new \RuntimeException(sprintf(
-            '[run-worker] fatal: 无法连接 Redis %s:%d，跨进程共享状态不可用，请求返回 500',
-            $options['redisHost'],
-            $options['redisPort'],
-        ));
-    }
-
-    // 生产 Redis 认证与库选择（ADR-027）：NYTHROS_REDIS_PASSWORD / NYTHROS_REDIS_DB 注入。
-    // 认证失败由上层 500 兜底（与建连失败同口径），worker 存活、Redis 恢复（含凭证修正）后自愈。
-    // Production Redis auth & db selection (ADR-027): injected via NYTHROS_REDIS_PASSWORD / NYTHROS_REDIS_DB.
-    // Auth failures fall into the same 500 fallback as connect failures — the worker survives and self-heals
-    // once Redis returns (including after credential fixes).
-    $redisPassword = getenv('NYTHROS_REDIS_PASSWORD');
-    if (is_string($redisPassword) && $redisPassword !== '') {
-        @$redis->auth($redisPassword);
-    }
-    $redisDb = getenv('NYTHROS_REDIS_DB');
-    if (is_string($redisDb) && $redisDb !== '' && preg_match('/^\d+$/', $redisDb) === 1) {
-        @$redis->select((int) $redisDb);
-    }
-
-    return $redis;
-};
+// 哨兵 HA（ADR-031）：NYTHROS_REDIS_SENTINELS 配置时经哨兵解析主库并追踪全部连接（主从切换原地重指向、
+// 失活连接自动重连）；未配置 = 直连，行为与接入前逐字节一致。认证/库选择口径不变（ADR-027，连接器内实施）。
+// Sentinel HA (ADR-031): with NYTHROS_REDIS_SENTINELS set the connector resolves the master and tracks every
+// connection (in-place re-pointing on failover, auto-reconnect of dead clients); unset = direct connect, behavior
+// byte-identical to before. Auth/db selection keeps the ADR-027 convention, applied inside the connector.
+$redisConnector = RedisConnector::fromEnv($options['redisHost'], $options['redisPort']);
+$redisFactory = $redisConnector->factory();
 
 // MySQL 连接工厂：lazy 建连（与 Redis 工厂同口径——Workerman fork 后各 worker 首次使用时各自建立独立连接，
 // 复制已建立的 socket fd 会破坏 MySQL 协议）。建连失败抛异常：被 ArchivePipeline 的存储契约捕获
@@ -324,6 +302,20 @@ $server = new WorkermanWebSocketServer(
     rateLimiter: new SimpleTokenBucket(refillPerSecond: 10.0, capacity: 20),
     errorSerializer: $serializer,
 );
+
+// 主从刷新定时器（仅哨兵模式；worker 进程内，缺省 5s 一轮）：哨兵切换完成后由本定时器把本进程全部
+// Redis 连接原地重指向新主（同时重连失活连接）——「切换完成 → worker 自愈」的延迟上界。
+// The master/replica refresh timer (Sentinel mode only; one 5s round per worker process by default): once the
+// sentinel failover completes, this timer re-points every Redis connection of this process at the new master
+// (and reconnects dead ones) — the upper bound from failover completion to worker self-healing.
+if ($redisConnector->isSentinelMode()) {
+    $server->onWorkerStart(static function () use ($redisConnector): void {
+        $timer = new WorkermanTimer();
+        $timer->add($redisConnector->refreshIntervalSeconds(), static function () use ($redisConnector): void {
+            $redisConnector->refresh();
+        }, true);
+    });
+}
 
 // 连接/断开控制台回显 + 慢客户端告警：便于观察客户端生命周期（检测不主动断开）。
 // Connect/close console echoes + slow-client alerts: client lifecycles stay observable (detect but never disconnect).

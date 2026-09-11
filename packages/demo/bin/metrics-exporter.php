@@ -24,6 +24,8 @@ declare(strict_types=1);
 
 require __DIR__ . '/../../../vendor/autoload.php';
 
+use Nythros\Framework\Cluster\RedisConnector;
+
 /** 与 engine PerfProbe::FRAME_BUCKETS_MS 对齐（perf-stats.php 同源）。 Buckets, matching PerfProbe::FRAME_BUCKETS_MS. */
 const FRAME_BUCKETS_MS = [0.0, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0];
 
@@ -282,7 +284,13 @@ foreach (array_slice($argv, 1) as $arg) {
     }
 }
 
-$redis = new \Redis();
+// 连接经 RedisConnector（ADR-031）：哨兵模式下由连接器解析主库；拉取时先做一轮节流刷新
+// （主从切换原地重指向 / 失活连接重连），Redis 不可用时照旧计 scrape 错误并返回 500。
+// Connection through RedisConnector (ADR-031): in Sentinel mode the connector resolves the master; each scrape
+// first runs a throttled refresh (in-place re-pointing on failover, reconnect of dead clients). An unavailable
+// Redis still bumps the scrape-error counter and returns 500.
+$redisConnector = RedisConnector::fromEnv($opts['redisHost'], $opts['redisPort']);
+$redis = null;
 $scrapeErrors = 0;
 $server = @stream_socket_server('tcp://' . $opts['addr'], $errno, $errstr);
 if ($server === false) {
@@ -311,20 +319,15 @@ while (true) {
     $body = '';
     $ok = false;
     try {
+        if ($redis === null) {
+            $redis = $redisConnector->client();
+        }
+        // 节流刷新（缺省 5s 一轮）：主从切换后把本连接重指向新主，失活连接重连。
+        // Throttled refresh (5s by default): re-point this connection at the new master after a failover and
+        // reconnect a dead client.
+        $redisConnector->refresh();
         if (!$redis->isConnected()) {
-            if (!$redis->connect($opts['redisHost'], $opts['redisPort'], 1.0)) {
-                throw new \RuntimeException('redis connect failed');
-            }
-            // 生产 Redis 认证与库选择（与 run-worker 同口径，ADR-028）
-            // Production Redis auth & db selection (same convention as run-worker, ADR-028).
-            $redisPassword = getenv('NYTHROS_REDIS_PASSWORD');
-            if (is_string($redisPassword) && $redisPassword !== '') {
-                @$redis->auth($redisPassword);
-            }
-            $redisDb = getenv('NYTHROS_REDIS_DB');
-            if (is_string($redisDb) && $redisDb !== '' && preg_match('/^\d+$/', $redisDb) === 1) {
-                @$redis->select((int) $redisDb);
-            }
+            throw new \RuntimeException('redis connection lost');
         }
         $body = renderMetrics(collectPerf($redis));
         $ok = true;

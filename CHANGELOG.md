@@ -21,6 +21,16 @@
 
 ### Added
 
+- **Redis 哨兵 HA 与连接自愈（[框架/Cluster + 部署 + 文档]，兑现 ADR-028 第二期，ADR-031）**：
+  新增 `RedisConnector`（哨兵主库解析 + 连接追踪 + 主变**原地重指向** + 失活连接自动重连；未配置
+  `NYTHROS_REDIS_SENTINELS` 即直连，开发行为不变）与 `ReplicaBarrier`（经济域权威写——货币/背包/
+  邮件/拍卖——`WAIT 1` 等副本确认，`NYTHROS_REDIS_AWAIT_REPLICAS=1` 开启、缺省关闭，屏障失败不改写结果）。
+  6 个生产入口接入（run-worker / start-maps / map-rolling / perf-stats / metrics-exporter / run-exporter），
+  worker 内 5s 刷新定时器（自愈上界 = 切换完成 + 5s，无需重启进程）。新增开发/演练栈 `deploy/redis-ha/`
+  （1 主 1 从 3 哨兵，与生产同构 quorum 2）与端到端演练 `failover-drill.sh`（写标记 + WAIT → 真实
+  failover → 同一连接恢复读写 → 独立连接复核新主 → 自动复位拓扑），WSL 实测 PASS。文档：deployment.md
+  §6（哨兵拓扑 / 应用接入 / 自愈与丢失窗口语义）+ §8.4（切换演练手册）、ADR-031、ADR-028 二期状态更新。
+  新增测试 `RedisConnectorTest`（11 例）与 `ReplicaBarrierTest`（4 例）。
 - **出站链回归测试网 + 热路径微优化实验（[框架/Server + 引擎/Kernel + 探针]，「实测说话」流程第二轮）**：
   FrameMergerTest 新增 3 例钉住 drain 边界语义——全 LOW 连接在软过滤下整条缺席、超配额且全 LOW 本帧不发、
   多连接独立成包键序稳定（正是本轮重构触碰的分支）。两项同机 A/B 通过的优化见下方 Performance。
@@ -223,6 +233,13 @@
 
 ### Fixed
 
+- **存量缺陷修复：已建立的 Redis 连接在服务端重启后永久失联（[框架/Cluster]，实测发现，ADR-031）**：
+  phpredis 对非 persistent 连接**不会自动重连**——旧 `\Redis` 对象此后每次调用都抛
+  `Redis server ... went away`，而各 store 把工厂产物永久缓存，导致既有「Redis 恢复后无需重启即自愈」
+  只在「建连期失败」成立、对「连接先建立后被重启打断」不成立。修复：`RedisConnector` 每轮 `refresh()`
+  对 `isConnected() === false` 的连接原地重连（对同一 `\Redis` 对象再次 `connect()`，实测可行）；
+  worker 侧 5s 定时器驱动，无需重启进程。同轮为间隔测量引入单调钟（WSL 墙钟每 ~34s 跳 ~1.85s，
+  实测），刷新节流与演练计时不再受钟跳影响。
 - **压测服务端采样器三连修 + 连接规模标定落地（[benchmarks/ + docs]，「容量口径」从错到准）**：
   ① 采样对象修正——`stress-map/hotzone/rooms` 旧口径按 cmdline 匹配 `start-maps.php`，命中的是
   Workerman **master**（不承载连接，CPU/RSS 恒平）：这正是历史档「CPU avg 0%」「RSS ≈37MB 恒定」

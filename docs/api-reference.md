@@ -5,7 +5,7 @@
 > 未标 `@internal` 的类/枚举（ADR-023/024）。`@internal` 实现类不构成 API 承诺，业务层只依赖 Contracts 接口。
 > 指南（用法与教程）见 [docs/ 索引](https://github.com/nythros/nythros/tree/master#文档索引)；本文件只做「有什么、叫什么、签名单什么」的索引。
 > 摘要中的 P 编号（P9/P11/P15…）是阶段验收记录的追溯锚点，对应 [blueprint/](https://github.com/nythros/nythros/tree/master/blueprint) 目录的编号验收文档。
-173 个公开符号（engine + framework）。
+175 个公开符号（engine + framework）。
 
 
 ## nythros/engine
@@ -611,6 +611,22 @@ NPC 基类：静态实体，无主动行为；交互由玩家触发 onInteract�
 | `consume(string $uid): ?array` | 原子消费快照票据（目的端 attach 时调用；取走即删，无票返回 null）。 |
 | `export(string $uid, array $snapshot): void` | 导出实体状态快照（源端 detach 时调用；覆盖同 uid 旧票）。 |
 
+#### `RedisConnector`
+Redis 连接器（ADR-031，哨兵 HA 实现的客户端侧唯一改造点）：连接工厂 + 哨兵主库解析 + 主从切换自愈。
+
+| 方法 | 说明 |
+|---|---|
+| `__construct(string $host, int $port, array $sentinels = [...], ?string $masterName = NULL, ?string $sentinelPassword = NULL, ?string $password = NULL, ?int $db = NULL, float $refreshIntervalSeconds = 5.0, float $connectTimeoutSeconds = 1.0, float $readTimeoutSeconds = 3.0, ?Closure $masterResolver = NULL)` |  |
+| `client(): Redis` | 新建一条连接（哨兵模式先解析主库地址），并纳入追踪。 |
+| `factory(): Closure` | 连接工厂闭包（store 构造参数直接可用的形态）。 |
+| `static` `fromEnv(string $host, int $port, float $connectTimeoutSeconds = 1.0): self` | 从环境变量构造（各入口统一口径）：哨兵三变量 + ADR-027 的认证/库选择。 |
+| `isSentinelMode(): bool` | 是否哨兵模式（未配置哨兵且无测试解析器 = 直连）。 |
+| `masterAddress(): array` | 当前使用中的地址（哨兵模式 = 最近一次解析/连接成功的主库；直连模式 = 配置地址）。 |
+| `refresh(bool $force = false): bool` | 主从刷新（worker 定时器周期调用；测试可 force 立即执行）。 |
+| `refreshIntervalSeconds(): float` | 刷新间隔（秒）：入口据此挂定时器。 Refresh interval (s): entry points arm their timers with it. |
+| `release(Redis $client): void` | 解除追踪（调用方主动 close 连接时配对调用；否则刷新会把已关闭的连接重新接上）。 |
+| `trackedClients(): int` | 追踪中的连接数（演练/观测用）。 Number of tracked connections (drills/observability). |
+
 #### `RedisPlayerTransferStore`
 转移票据的 Redis 存储（ADR-025）：SETEX 覆盖导出 + Lua GET+DEL 原子消费。 · implements `Nythros\Framework\Cluster\PlayerTransferStoreInterface`
 
@@ -619,6 +635,17 @@ NPC 基类：静态实体，无主动行为；交互由玩家触发 onInteract�
 | `__construct(Redis\|Closure $redis, string $prefix = 'nythros:', int $ttlSeconds = 30)` |  |
 | `consume(string $uid): ?array` |  |
 | `export(string $uid, array $snapshot): void` |  |
+
+#### `ReplicaBarrier`
+副本确认屏障（ADR-031 §3）：经济域权威写返回前的 `WAIT 1 <timeout>` 耐久加固。
+
+| 方法 | 说明 |
+|---|---|
+| `static` `await(Redis $redis, ?int $timeoutMs = NULL): void` | 等待至少 1 个副本确认（未启用或抛错时为无操作/仅日志）。 |
+| `static` `configure(bool $enabled, int $timeoutMs = 100): void` | 配置屏障（装配层按环境变量调用一次；测试可直接调用）。 |
+| `static` `enabled(): bool` | 是否启用。 Whether the barrier is enabled. |
+| `static` `enabledFromEnv(): bool` | 环境开关读取（NYTHROS_REDIS_AWAIT_REPLICAS=1）。 Reads the env flag (NYTHROS_REDIS_AWAIT_REPLICAS=1). |
+| `static` `reset(): void` | 复位（测试隔离用）。 Resets state (test isolation). |
 
 ### `Nythros\Framework\Combat`
 

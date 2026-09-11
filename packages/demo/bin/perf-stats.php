@@ -12,6 +12,8 @@ declare(strict_types=1);
 
 require __DIR__ . '/../../../vendor/autoload.php';
 
+use Nythros\Framework\Cluster\RedisConnector;
+
 $opts = ['serviceId' => 'map-1#ch-1', 'redisHost' => '127.0.0.1', 'redisPort' => 6379, 'json' => false];
 foreach (array_slice($argv, 1) as $arg) {
     if (preg_match('/^--serviceId=(.+)$/', $arg, $m)) {
@@ -25,9 +27,13 @@ foreach (array_slice($argv, 1) as $arg) {
     }
 }
 
-$redis = new \Redis();
-if ($redis->connect($opts['redisHost'], $opts['redisPort'], 1.0) !== true) {
-    fwrite(STDERR, "[perf-stats] fatal: 无法连接 Redis\n");
+// 连接经 RedisConnector（ADR-031）：NYTHROS_REDIS_SENTINELS 配置时先向哨兵解析主库地址；未配置 = 直连。
+// Connection through RedisConnector (ADR-031): with NYTHROS_REDIS_SENTINELS set the master address is resolved
+// via sentinels first; unset = direct connect.
+try {
+    $redis = RedisConnector::fromEnv($opts['redisHost'], $opts['redisPort'])->client();
+} catch (\RuntimeException $e) {
+    fwrite(STDERR, sprintf("[perf-stats] fatal: %s\n", $e->getMessage()));
     exit(1);
 }
 

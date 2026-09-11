@@ -22,6 +22,7 @@ use Nythros\Framework\Auction\AuctionStore;
 use Nythros\Framework\Auction\CurrencyLedger;
 use Nythros\Framework\BasePlayer;
 use Nythros\Framework\Cluster\RedisPlayerTransferStore;
+use Nythros\Framework\Cluster\ReplicaBarrier;
 use Nythros\Framework\Combat\BuffService;
 use Nythros\Framework\Combat\CombatService;
 use Nythros\Framework\Combat\EntityTypeIndex;
@@ -137,6 +138,15 @@ final class MapChannelFactory
         \Closure $pdoFactory,
     ): MapServer {
         $serviceId = sprintf('%s#%s', $mapId, $channelId);
+
+        // 耐久屏障（ADR-031 §3）：NYTHROS_REDIS_AWAIT_REPLICAS=1 时，经济域权威写（货币/背包/邮件/拍卖）
+        // 返回前 WAIT 1 等至少一个副本确认——把主从切换的丢失窗口压到「未及确认的写」。缺省关闭：
+        // 单实例/无从库环境启用会让每次写阻塞满 timeout（100ms），只应在 HA 部署与演练时开启。
+        // Durability barrier (ADR-031 §3): with NYTHROS_REDIS_AWAIT_REPLICAS=1, economic authoritative writes
+        // (currency/bag/mail/auction) WAIT 1 for a replica ack before returning, shrinking the failover loss
+        // window to "writes not yet acked". Off by default: against a single-instance/replica-less Redis it blocks
+        // every write for the full timeout (100ms) — enable it only in HA deployments and drills.
+        ReplicaBarrier::configure(ReplicaBarrier::enabledFromEnv());
 
         // 分区调度器：actors/network/maintenance 三个预算分区（World 帧末网络 flush 走 network 区）
         // Region-budgeted scheduler: actors/network/maintenance regions (the frame-end network flush goes to the network region)

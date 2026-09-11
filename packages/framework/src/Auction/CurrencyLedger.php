@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Nythros\Framework\Auction;
 
+use Nythros\Framework\Cluster\ReplicaBarrier;
+
 /**
  * 货币账本（D2 缺口最小语义：余额/托管/结算的余额面）。
  * The currency ledger (the minimal D2-gap semantics: the balance side of escrow/settlement).
@@ -93,6 +95,10 @@ final class CurrencyLedger
         }
 
         $this->redis()->incrBy($this->balanceKey($uid), $amount);
+
+        // 耐久屏障（ADR-031 §3）：入账属「不可丢」写，启用时等副本确认后再返回。
+        // Durability barrier (ADR-031 §3): a credit is a must-not-lose write — wait for a replica ack before returning when enabled.
+        ReplicaBarrier::await($this->redis());
     }
 
     /**
@@ -108,7 +114,15 @@ final class CurrencyLedger
             throw new \InvalidArgumentException(sprintf('CurrencyLedger: 出账金额必须为正整数: %d', $amount));
         }
 
-        return $this->redis()->eval(self::WITHDRAW_SCRIPT, [$this->balanceKey($uid), (string) $amount], 1) === 1;
+        $withdrawn = $this->redis()->eval(self::WITHDRAW_SCRIPT, [$this->balanceKey($uid), (string) $amount], 1) === 1;
+
+        // 耐久屏障（ADR-031 §3）：仅在实际扣减（返回 true）时等副本确认；余额不足的拒绝无写入可保。
+        // Durability barrier (ADR-031 §3): only an actual debit (true) waits for a replica ack; a short-balance rejection wrote nothing.
+        if ($withdrawn) {
+            ReplicaBarrier::await($this->redis());
+        }
+
+        return $withdrawn;
     }
 
     /**

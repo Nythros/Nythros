@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nythros\Framework\Inventory;
 
+use Nythros\Framework\Cluster\ReplicaBarrier;
 use Nythros\Framework\Inventory;
 
 /**
@@ -63,6 +64,10 @@ final class RedisInventoryStore
         }
 
         $this->redis()->hIncrBy($this->bagKey($uid), $itemId, $count);
+
+        // 耐久屏障（ADR-031 §3）：背包是「不可丢」权威写（export 模式下 Redis 即权威）。
+        // Durability barrier (ADR-031 §3): the bag is a must-not-lose authoritative write (it IS the authority in export mode).
+        ReplicaBarrier::await($this->redis());
     }
 
     /**
@@ -77,11 +82,19 @@ final class RedisInventoryStore
             throw new \InvalidArgumentException(sprintf('RedisInventoryStore: 移除数量必须为正: %d', $count));
         }
 
-        return $this->redis()->eval(
+        $removed = $this->redis()->eval(
             self::REMOVE_SCRIPT,
             [$this->bagKey($uid), $itemId, (string) $count],
             1,
         ) === 1;
+
+        // 耐久屏障（ADR-031 §3）：仅实际扣减时等待（不足拒绝无写入可保）。
+        // Durability barrier (ADR-031 §3): only an actual removal waits (an insufficient-balance rejection wrote nothing).
+        if ($removed) {
+            ReplicaBarrier::await($this->redis());
+        }
+
+        return $removed;
     }
 
     /**
@@ -141,6 +154,7 @@ final class RedisInventoryStore
         $redis = $this->redis();
         if ($fields === []) {
             $redis->del($key);
+            ReplicaBarrier::await($redis);
 
             return;
         }
@@ -149,6 +163,10 @@ final class RedisInventoryStore
         $pipeline->del($key);
         $pipeline->hMSet($key, $fields);
         $pipeline->exec();
+
+        // 耐久屏障（ADR-031 §3）：整表回写是「不可丢」写（重启恢复的唯一来源）。
+        // Durability barrier (ADR-031 §3): the whole-table write-back is a must-not-lose write (the sole restart-recovery source).
+        ReplicaBarrier::await($redis);
     }
 
     /**

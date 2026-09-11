@@ -99,10 +99,77 @@ php packages/demo/bin/map-rolling.php watch map-1#ch-1           # 等 playerCou
 
 social 三角色无状态，可直接替换进程。容量准入/draining 语义见 [mmorpg-mode](mmorpg-mode.md) §5。
 
-## 6. 生产 checklist
+## 6. Redis 高可用：哨兵（可选，ADR-031）
+
+单实例 Redis 是全服唯一跨进程事实源（token/注册表/位置快照/经济域），本仓库内置哨兵客户端支持：
+**不配置即直连**（开发零影响），配置后主库故障自动切换、worker 无重启自愈。
+
+### 6.1 服务端拓扑
+
+1 主 + 1 从 + **3 哨兵**（quorum 2），哨兵可与应用混部（进程很轻）：
+
+```conf
+# 主库 redis.conf
+requirepass <pw>
+appendonly yes
+min-replicas-to-write 1        # 脑裂写护栏：无健康从库即拒写（NOREPLICAS）
+min-replicas-max-lag 10
+
+# 从库 redis.conf
+replicaof <master-ip> 6379
+masterauth <pw>                # 必配：升主后要能连上新主，漏配会在切换后卡死
+requirepass <pw>
+
+# 哨兵 sentinel.conf ×3（端口/目录不同）
+port 26379
+sentinel monitor nythros <master-ip> 6379 2
+sentinel auth-pass nythros <pw>
+sentinel down-after-milliseconds nythros 5000
+sentinel failover-timeout nythros 60000
+sentinel parallel-syncs nythros 1
+```
+
+要点：**数据端口（6379/从库端口）必须对应用放通**——哨兵只回答「谁是主」，数据是应用直连主从的；
+哨兵配置文件必须可写（运行时会改写自身）；容器/多网卡环境给数据节点配 `replica-announce-ip/port`，
+否则哨兵上报容器内网地址。
+
+开发/演练用 `deploy/redis-ha/`（脚本化同构栈，端口 16379/16380 + 26379-81，与 6379 单实例共存）：
+
+```bash
+bash deploy/redis-ha/start.sh            # 启动（就绪校验：主 PONG → 从 link up → 哨兵认主）
+bash deploy/redis-ha/status.sh           # 角色与主库地址
+bash deploy/redis-ha/failover-drill.sh   # 端到端切换演练（见 §8.4）
+bash deploy/redis-ha/stop.sh             # 停止
+```
+
+### 6.2 应用侧接入
+
+| 环境变量 | 作用 | 缺省 |
+|---|---|---|
+| `NYTHROS_REDIS_SENTINELS` | 哨兵端点列表（逗号分隔 `host:port`）；**不设置 = 直连** | 空（直连） |
+| `NYTHROS_REDIS_MASTER` | 哨兵监控组名 | `nythros`（配置哨兵时） |
+| `NYTHROS_REDIS_SENTINEL_PASSWORD` | 哨兵自身认证密码（哨兵开 requirepass 时） | 空 |
+| `NYTHROS_REDIS_AWAIT_REPLICAS` | `1` = 经济域权威写 `WAIT 1` 等副本确认（耐久屏障） | 关闭 |
+
+```bash
+export NYTHROS_REDIS_SENTINELS=10.0.0.11:26379,10.0.0.12:26379,10.0.0.13:26379
+export NYTHROS_REDIS_MASTER=nythros
+export NYTHROS_REDIS_AWAIT_REPLICAS=1        # 有健康从库时开启（无副本环境会拖慢每次写）
+```
+
+**自愈语义**：worker 每 5s 向哨兵核对主库地址，切换完成后把本进程全部 Redis 连接**原地重指向**新主；
+Redis 重启/闪断导致的失活连接同周期自动重连（无需重启 worker）。切换窗口内请求走既有 500 兜底。
+**丢失窗口**：开屏障的写收敛为「主库已提交、副本未确认」的毫秒级；未开屏障的键族（队伍/帮派/好友/
+任务/排行/位置快照/票据）按快照语义允许丢最后一次写。
+
+## 7. 生产 checklist
 
 - [ ] deploy.yaml：redis/mysql host 指向生产地址；端口无冲突（DeployConfig 启动即校验）
 - [ ] Redis：开启认证（`NYTHROS_REDIS_PASSWORD`，见 ADR-028）+ 网络隔离（token/转移票据/位置快照都在里面）；MySQL 最小权限账号
+- [ ] Redis 哨兵（可选，ADR-031）：3 哨兵 / quorum 2 / 从库 `masterauth` / `min-replicas-to-write 1`；
+      `NYTHROS_REDIS_SENTINELS` + `NYTHROS_REDIS_MASTER` 已注入每个服务实例；主从数据端口已放通
+- [ ] 经济域耐久：HA 部署设 `NYTHROS_REDIS_AWAIT_REPLICAS=1`，且确认从库健康（无副本时该开关会拖慢每次写）
+- [ ] 主从切换演练执行过并记录耗时（§8.4；`deploy/redis-ha/failover-drill.sh` 为本地等价演练）
 - [ ] TLS 前置终结（反向代理/LB），明文凭据只到 gateway（见 [security.md](security.md) §1）
 - [ ] 账号体系：`NYTHROS_ACCOUNTS_FILE` 替代明文 env（哈希表形态，见 [security.md](security.md) §5）；
       防爆破阈值按预期账号规模调校（`NYTHROS_AUTH_MAX_ATTEMPTS`/`NYTHROS_AUTH_LOCKOUT_SECONDS`）
@@ -110,18 +177,18 @@ social 三角色无状态，可直接替换进程。容量准入/draining 语义
 - [ ] 演示账号已下线，`StaticGmAuthorizer` 已替换为生产权限体系
 - [ ] metrics-exporter 部署并接入 Prometheus（§4，同样注入 `NYTHROS_REDIS_PASSWORD`），关键告警已配置
 - [ ] 滚动更新流程演练过一次（§5），`map-rolling.php mark-stopping/watch` 可用
-- [ ] 备份/恢复演练过一次（§7）
+- [ ] 备份/恢复演练过一次（§8）
 - [ ] 容量压测在目标硬件复测过（[performance.md](performance.md) §6.4 复测清单）
 - [ ] 归档链路（export 模式，缺省）：`type: storage` 已声明、exporter 存活（启动日志 `[run-exporter] started`；
       离线自检 `php packages/demo/bin/run-exporter.php --self-test`）、`XLEN nythros:export:players` 有界（无持续增长）；
       mysql 回退模式：worker 直写归档生效（`MySqlStorage` + 幂等 `createSchema` + 30s 兜底 + 合并窗 flush）；
-      两种模式都在 staging 验证建表与恢复（§7）
+      两种模式都在 staging 验证建表与恢复（§8）
 
-## 7. 备份与恢复演练
+## 8. 备份与恢复演练
 
 上线前**至少完整演练一次**，把「能恢复」变成记录在案的事实而不是假设。
 
-### 7.1 备份对象与策略
+### 8.1 备份对象与策略
 
 | 对象 | 内容 | 策略建议 |
 |---|---|---|
@@ -129,7 +196,7 @@ social 三角色无状态，可直接替换进程。容量准入/draining 语义
 | Redis | token/转移票据（短 TTL，可不备份）、队伍/帮派/好友/任务/邮件/拍卖/排行/**背包 `nythros:bag:*`（export 模式权威）**、导出 Stream（积压上限=保险丝值） | 开 AOF（everysec）+ 每日 RDB；队伍/帮派等业务键与 token 分库（`NYTHROS_REDIS_DB`）便于差异化管理 |
 | 配置 | deploy.yaml + 玩法三表 + 账号文件 | 随代码版本管理；账号文件**永不入库**（明文纪律，见 security.md §5） |
 
-### 7.2 恢复演练步骤（staging 执行并记录）
+### 8.2 恢复演练步骤（staging 执行并记录）
 
 1. **MySQL 恢复**：空库 → dump 导入 → `MySqlStorage::createSchema` 幂等校验 → 启动 map worker →
    抽样 `ArchivePipeline::load(uid)` 核对若干已知玩家归档；
@@ -140,7 +207,7 @@ social 三角色无状态，可直接替换进程。容量准入/draining 语义
    记录实际表现；
 4. **演练产物**：把以上步骤的实际命令、耗时、偏差写进当次发布记录（blueprint/ 附录或内部 runbook）。
 
-### 7.3 已知边界
+### 8.3 已知边界
 
 - 丢失窗口契约（export 模式）：游戏 worker 崩溃时，最后 ≤30s 未冲刷的脏快照随进程内存消失——但在线态可从
   Redis 即时恢复（背包权威已在 `nythros:bag:*`），真正丢的是未冲刷窗口的增量；这是吞吐与持久性的既有取舍
@@ -150,7 +217,28 @@ social 三角色无状态，可直接替换进程。容量准入/draining 语义
   续消费（PEL 未 ack 条目自动重放，at-least-once）；
 - MySQL 长时间不可用时 exporter 存活但 upsert 持续失败（条目滞留 PEL，恢复后重放）——不影响游戏侧帧延迟。
 
-## 8. 发布与仓库形态
+### 8.4 Redis 主从切换演练（哨兵，ADR-031）
+
+上线前**至少完整演练一次**（与 §8.2 的恢复演练并列），把「切换后应用自愈」变成记录在案的事实：
+
+```bash
+# 本地等价演练（deploy/redis-ha/ 同构栈：1 主 1 从 3 哨兵）
+bash deploy/redis-ha/start.sh
+bash deploy/redis-ha/failover-drill.sh        # 失败退出码非 0；默认演练后自动复位拓扑
+
+# 生产/预发：直接对真实哨兵触发，观察各服务实例日志
+redis-cli -p <sentinel-port> sentinel failover <master-name>
+```
+
+演练断言链（`failover-drill.sh` 自动执行）：① 写入标记并 `WAIT 1` 获副本确认（耐久屏障语义）→
+② 触发真实切换后**同一连接**恢复读写（连接原地重指向）→ ③ 独立连接直连新主复核标记存在。
+
+记录项：切换完成耗时（哨兵日志 `+switch-master` 到应用日志 `[RedisConnector] 主库切换`）、
+自愈耗时（应 ≤ 5s 刷新周期 + 切换耗时）、演练期间业务失败面（预期：切换窗口内请求 500、新会话
+不可进入，无进程重启、无数据异常）。WSL 环境注意：哨兵会因子系统时钟跳变持续进入 tilt 模式，
+切换可能延迟至 30s（应用自愈仍成立）——该现象仅限 WSL，生产物理机/云主机无此问题。
+
+## 9. 发布与仓库形态
 
 **开发只有一个仓库**：[Nythros/Nythros](https://github.com/Nythros/Nythros)（monorepo，含
 `packages/engine|framework|skeleton|demo|client-js`）。用户可见的三个 Composer 包是它的**发布镜像**（ADR-019 决策 B）：

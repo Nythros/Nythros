@@ -35,6 +35,7 @@ declare(strict_types=1);
 
 require __DIR__ . '/../../../vendor/autoload.php';
 
+use Nythros\Framework\Cluster\RedisConnector;
 use Nythros\Persistence\MySqlStorage;
 use Workerman\Timer;
 use Workerman\Worker;
@@ -197,19 +198,13 @@ Worker::$pidFile = $pidFileOpt ?? sprintf('%s/nythros-storage-exporter-%d.pid', 
 $worker->onWorkerStart = static function () use ($options): void {
     $consumer = sprintf('exporter-%s-%d', gethostname(), getmypid());
 
-    $connectRedis = static function () use ($options): \Redis {
-        $redis = new \Redis();
-        $ok = @$redis->connect($options['redisHost'], $options['redisPort'], 2.0);
-        if ($ok !== true) {
-            throw new \RuntimeException(sprintf('Redis connect failed: %s:%d', $options['redisHost'], $options['redisPort']));
-        }
-        $redisPassword = getenv('NYTHROS_REDIS_PASSWORD');
-        if (is_string($redisPassword) && $redisPassword !== '') {
-            @$redis->auth($redisPassword);
-        }
-
-        return $redis;
-    };
+    // 连接经 RedisConnector（ADR-031）：哨兵模式解析主库 + 追踪连接（消费轮内的节流刷新负责切换重指向
+    // 与失活重连）；建连失败抛异常，由启动期 fatal 兜底（与既有口径一致）。
+    // Connections run through RedisConnector (ADR-031): in Sentinel mode the master is resolved via sentinels and
+    // the connection is tracked (the loop's throttled refresh re-points it after a failover and reconnects a dead
+    // client); connect failures throw, caught by the boot-time fatal path (the existing convention).
+    $redisConnector = RedisConnector::fromEnv($options['redisHost'], $options['redisPort'], connectTimeoutSeconds: 2.0);
+    $connectRedis = static fn (): \Redis => $redisConnector->client();
     $connectPdo = static function () use ($options): PDO {
         $dsn = sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4', $options['mysqlHost'], $options['mysqlPort'], $options['mysqlDb']);
         // 与 run-worker 的 pdoFactory 同参:异常模式 + 真预处理（归档侧写 JSON 列需要 native prepare）
@@ -233,6 +228,7 @@ $worker->onWorkerStart = static function () use ($options): void {
             }
         }
         $bootRedis->close();
+        $redisConnector->release($bootRedis); // 启动连接已主动关闭：解除追踪，避免刷新把它重新接上 Untrack the deliberately closed boot client so refresh never resurrects it.
         MySqlStorage::createSchema($connectPdo(), MySqlStorage::DEFAULT_TABLE);
     } catch (\Throwable $e) {
         exporterFail($e->getMessage());
@@ -269,6 +265,10 @@ $worker->onWorkerStart = static function () use ($options): void {
                 $redis = $connectRedis();
                 $claimCursor = '0-0';
             }
+            // 节流刷新（缺省 5s 一轮；哨兵模式）：主从切换后原地重指向新主，失活连接重连——消费轮无需自建重连。
+            // Throttled refresh (5s by default; Sentinel mode): re-point at the new master after a failover and
+            // reconnect a dead client — the consume loop needs no reconnect logic of its own.
+            $redisConnector->refresh();
             if ($storage === null) {
                 $storage = new MySqlStorage($connectPdo);
             }

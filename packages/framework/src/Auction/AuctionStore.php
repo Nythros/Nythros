@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Nythros\Framework\Auction;
 
+use Nythros\Framework\Cluster\ReplicaBarrier;
+
 /**
  * 交易行挂单存储（Redis 持久，无 TTL；购买/撤单走 Redis Lua 原子语义）。
  * The auction listing store (Redis-backed, no TTL; purchase/cancel run as atomic Redis Lua).
@@ -157,6 +159,10 @@ LUA;
             'createdAt' => microtime(true),
         ]);
 
+        // 耐久屏障（ADR-031 §3）：挂单即托管资产，属「不可丢」写。
+        // Durability barrier (ADR-031 §3): a listing is an escrowed asset — a must-not-lose write.
+        ReplicaBarrier::await($redis);
+
         return true;
     }
 
@@ -295,6 +301,12 @@ LUA;
         if (!is_array($result)) {
             throw new \RuntimeException(sprintf('AuctionStore Lua 执行失败: %s', (string) $this->redis()->getLastError()));
         }
+
+        // 耐久屏障（ADR-031 §3）：购买/撤单的托管资产变更同属「不可丢」写（含少量未写入的错误路径，
+        // 代价是启用时多等一次 timeout——交易行操作低频，可接受）。
+        // Durability barrier (ADR-031 §3): purchase/cancel mutate escrowed assets — must-not-lose writes too (a few
+        // no-op error paths pay one extra timeout when enabled; auction operations are low-frequency, acceptable).
+        ReplicaBarrier::await($this->redis());
 
         return array_map(
             static fn (mixed $item): int|string => is_int($item) || is_string($item) ? $item : '',

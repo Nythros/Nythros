@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Nythros\Framework\Mail;
 
+use Nythros\Framework\Cluster\ReplicaBarrier;
+
 /**
  * 邮件存储 Redis 实现（照 GuildStore 先例：\Redis|\Closure 构造 + 键前缀 + 格式白名单，无 TTL 持久）。
  * Mail store, Redis-backed (following the GuildStore precedent: a \Redis|\Closure constructor, key prefixes and
@@ -89,6 +91,10 @@ LUA;
         if ($result === false) {
             throw new \RuntimeException(sprintf('RedisMailStore insert 失败: %s', (string) $this->redis()->getLastError()));
         }
+
+        // 耐久屏障（ADR-031 §3）：邮件承载托管资产（附件），insert 属「不可丢」写。
+        // Durability barrier (ADR-031 §3): mail carries escrowed assets (attachments); insert is a must-not-lose write.
+        ReplicaBarrier::await($this->redis());
     }
 
     public function get(string $uid, string $mailId): ?array
@@ -129,6 +135,12 @@ LUA;
 
         $result = $this->redis()->eval(self::CLAIM_GATE_SCRIPT, [$this->claimedKey($uid), $mailId], 1);
 
+        // 耐久屏障（ADR-031 §3）：领取闸门置位即防重复领取的权威标记，属「不可丢」写。
+        // Durability barrier (ADR-031 §3): the claim gate is the authoritative duplicate-claim marker — a must-not-lose write.
+        if ($result === 1) {
+            ReplicaBarrier::await($this->redis());
+        }
+
         return $result === 1;
     }
 
@@ -138,6 +150,11 @@ LUA;
         $this->assertMailId($mailId);
 
         $this->redis()->sRem($this->claimedKey($uid), $mailId);
+
+        // 耐久屏障（ADR-031 §3）：回滚丢失会把邮件卡在「已领取」态（玩家无法再领），同样按不可丢处理。
+        // Durability barrier (ADR-031 §3): a lost rollback strands the mail in the claimed state (the player can never claim it
+        // again), so it is treated as must-not-lose too.
+        ReplicaBarrier::await($this->redis());
     }
 
     public function delete(string $uid, string $mailId): bool
@@ -147,6 +164,10 @@ LUA;
 
         $deleted = $this->redis()->hDel($this->mailboxKey($uid), $mailId);
         $this->redis()->sRem($this->claimedKey($uid), $mailId);
+
+        // 耐久屏障（ADR-031 §3）：删除（含附件已领的终态）属「不可丢」写。
+        // Durability barrier (ADR-031 §3): deletion (the terminal state after claiming) is a must-not-lose write.
+        ReplicaBarrier::await($this->redis());
 
         return $deleted > 0;
     }

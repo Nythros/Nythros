@@ -14,6 +14,7 @@ declare(strict_types=1);
 require __DIR__ . '/../../../vendor/autoload.php';
 
 use Nythros\Cluster\RedisServiceRegistry;
+use Nythros\Framework\Cluster\RedisConnector;
 
 /**
  * 解析 CLI 参数（参数非法 = 用法错误：stderr 归因 + exit(1)）。
@@ -105,21 +106,15 @@ stream_set_write_buffer(STDERR, 0);
 
 // Redis 连接工厂：一次性 CLI 单进程，直接建连即可；沿用 run-worker.php 的工厂模式与 connect 超时（1s），
 // 连接失败 throw 而非 exit——由下方 catch 兜底转为 stderr fatal + exit(1)，避免未捕获异常打印裸堆栈。
+// 哨兵 HA（ADR-031）：NYTHROS_REDIS_SENTINELS 配置时先解析主库；watch 长轮询每圈做一轮节流刷新
+// （主从切换后重指向新主、失活重连），滚动更新不受 Redis 切换影响。
 // Redis connection factory: a one-shot single-process CLI just connects directly; it reuses run-worker.php's factory pattern
-// and 1s connect timeout — failures throw instead of exit(), converted to a stderr fatal + exit(1) by the catch below to avoid raw stack traces.
-$redisFactory = static function () use ($args): \Redis {
-    $redis = new \Redis();
-    try {
-        $connected = @$redis->connect($args['redisHost'], $args['redisPort'], 1.0);
-    } catch (\Throwable) {
-        $connected = false;
-    }
-    if ($connected !== true) {
-        throw new \RuntimeException(sprintf('无法连接 Redis %s:%d', $args['redisHost'], $args['redisPort']));
-    }
-
-    return $redis;
-};
+// and 1s connect timeout — failures throw instead of exit(), converted to a stderr fatal + exit(1) by the catch below.
+// Sentinel HA (ADR-031): with NYTHROS_REDIS_SENTINELS the master is resolved first; the long-polling `watch` command runs a
+// throttled refresh each round (re-point at the new master after a failover, reconnect a dead client), so rolling updates
+// survive a Redis switch.
+$redisConnector = RedisConnector::fromEnv($args['redisHost'], $args['redisPort']);
+$redisFactory = $redisConnector->factory();
 
 $registry = new RedisServiceRegistry($redisFactory);
 
@@ -157,6 +152,7 @@ try {
             );
 
             while (true) {
+                $redisConnector->refresh(); // 哨兵模式：切换/闪断自愈（节流 5s，与轮询间隔同阶）Sentinel mode: failover/blip self-healing (5s throttle, same order as the poll interval).
                 $instances = $registry->discover('map');
                 $instance = $instances[$args['serviceId']] ?? null;
 

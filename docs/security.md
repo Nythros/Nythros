@@ -100,7 +100,7 @@ GM 能力走 `Nythros\Framework\Gm` 命令总线，**不是直连 Redis 的裸�
 - [ ] TLS 前置终结；Redis 开认证、MySQL 最小权限（§5）
 - [ ] 认证入口限流已配置并压测过（§3）；账号防爆破阈值已按账号规模调校（§2）
 - [ ] 协议版本守卫已设置 `NYTHROS_MIN_CLIENT_VERSION`（§3，ADR-027）
-- [ ] 备份/恢复演练过一次（deployment.md §7）
+- [ ] 备份/恢复演练过一次（deployment.md §8）
 - [ ] 所有游戏路由有服务器权威校验（best-practices §3）
 - [ ] GM 命令全部过 `GmPermissionInterface`，权限体系已替换 `StaticGmAuthorizer`（§4）
 - [ ] 演示账号已下线（§5）
