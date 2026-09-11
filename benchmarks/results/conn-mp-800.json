@@ -1,0 +1,91 @@
+{
+    "clients": 800,
+    "procs": 8,
+    "seconds": 20.1,
+    "moveMs": 1000,
+    "settleMoves": 0,
+    "authOk": 800,
+    "establishFailed": 0,
+    "frames": 6289320,
+    "bytesKB": 206726.4,
+    "fps": 313610.7,
+    "peakFps": 1273530.8,
+    "latencyMs": {
+        "P50": 8.3,
+        "P90": 266.1,
+        "P99": 2074.8,
+        "samples": 121312
+    },
+    "p99": 2074.8,
+    "workers": [
+        {
+            "clients": 100,
+            "authOk": 100,
+            "establishFailed": 0,
+            "frames": 654623,
+            "peakFps": 111788.7
+        },
+        {
+            "clients": 100,
+            "authOk": 100,
+            "establishFailed": 0,
+            "frames": 884417,
+            "peakFps": 178749.1
+        },
+        {
+            "clients": 100,
+            "authOk": 100,
+            "establishFailed": 0,
+            "frames": 674066,
+            "peakFps": 136240.3
+        },
+        {
+            "clients": 100,
+            "authOk": 100,
+            "establishFailed": 0,
+            "frames": 700980,
+            "peakFps": 117563.6
+        },
+        {
+            "clients": 100,
+            "authOk": 100,
+            "establishFailed": 0,
+            "frames": 849283,
+            "peakFps": 208233.9
+        },
+        {
+            "clients": 100,
+            "authOk": 100,
+            "establishFailed": 0,
+            "frames": 833872,
+            "peakFps": 189979.9
+        },
+        {
+            "clients": 100,
+            "authOk": 100,
+            "establishFailed": 0,
+            "frames": 828398,
+            "peakFps": 171554.5
+        },
+        {
+            "clients": 100,
+            "authOk": 100,
+            "establishFailed": 0,
+            "frames": 863681,
+            "peakFps": 159420.8
+        }
+    ],
+    "server": {
+        "rssBeforeKb": 96912,
+        "rssAfterKb": 601232,
+        "rssPerConnKb": 630.4,
+        "cpuPct": 310.25,
+        "cpuPctPerConn": 0.3878,
+        "pids": [
+            727,
+            728,
+            729,
+            730
+        ]
+    }
+}

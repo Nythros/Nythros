@@ -1,0 +1,77 @@
+{
+    "clients": 600,
+    "procs": 6,
+    "seconds": 20,
+    "moveMs": 1000,
+    "settleMoves": 0,
+    "authOk": 600,
+    "establishFailed": 0,
+    "frames": 5511420,
+    "bytesKB": 180323.3,
+    "fps": 275100.5,
+    "peakFps": 1148683.8,
+    "latencyMs": {
+        "P50": 38.1,
+        "P90": 215.9,
+        "P99": 2151.2,
+        "samples": 107984
+    },
+    "p99": 2151.2,
+    "workers": [
+        {
+            "clients": 100,
+            "authOk": 100,
+            "establishFailed": 0,
+            "frames": 1002138,
+            "peakFps": 186740.4
+        },
+        {
+            "clients": 100,
+            "authOk": 100,
+            "establishFailed": 0,
+            "frames": 868054,
+            "peakFps": 192527.9
+        },
+        {
+            "clients": 100,
+            "authOk": 100,
+            "establishFailed": 0,
+            "frames": 481460,
+            "peakFps": 191677.6
+        },
+        {
+            "clients": 100,
+            "authOk": 100,
+            "establishFailed": 0,
+            "frames": 1020579,
+            "peakFps": 195456.8
+        },
+        {
+            "clients": 100,
+            "authOk": 100,
+            "establishFailed": 0,
+            "frames": 1069254,
+            "peakFps": 188796.8
+        },
+        {
+            "clients": 100,
+            "authOk": 100,
+            "establishFailed": 0,
+            "frames": 1069935,
+            "peakFps": 193484.3
+        }
+    ],
+    "server": {
+        "rssBeforeKb": 97680,
+        "rssAfterKb": 337316,
+        "rssPerConnKb": 399.4,
+        "cpuPct": 292.7,
+        "cpuPctPerConn": 0.4878,
+        "pids": [
+            706,
+            707,
+            708,
+            709
+        ]
+    }
+}

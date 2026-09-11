@@ -1,0 +1,105 @@
+{
+    "clients": 1000,
+    "procs": 10,
+    "seconds": 20.1,
+    "moveMs": 1000,
+    "settleMoves": 0,
+    "authOk": 1000,
+    "establishFailed": 0,
+    "frames": 6626505,
+    "bytesKB": 218440.1,
+    "fps": 330301.6,
+    "peakFps": 1350295.9,
+    "latencyMs": {
+        "P50": 6.7,
+        "P90": 281.1,
+        "P99": 1724.2,
+        "samples": 132427
+    },
+    "p99": 1724.2,
+    "workers": [
+        {
+            "clients": 100,
+            "authOk": 100,
+            "establishFailed": 0,
+            "frames": 630697,
+            "peakFps": 145429.7
+        },
+        {
+            "clients": 100,
+            "authOk": 100,
+            "establishFailed": 0,
+            "frames": 699182,
+            "peakFps": 112575.4
+        },
+        {
+            "clients": 100,
+            "authOk": 100,
+            "establishFailed": 0,
+            "frames": 672873,
+            "peakFps": 120190
+        },
+        {
+            "clients": 100,
+            "authOk": 100,
+            "establishFailed": 0,
+            "frames": 623727,
+            "peakFps": 135877
+        },
+        {
+            "clients": 100,
+            "authOk": 100,
+            "establishFailed": 0,
+            "frames": 640652,
+            "peakFps": 159559.1
+        },
+        {
+            "clients": 100,
+            "authOk": 100,
+            "establishFailed": 0,
+            "frames": 704286,
+            "peakFps": 140704.5
+        },
+        {
+            "clients": 100,
+            "authOk": 100,
+            "establishFailed": 0,
+            "frames": 698283,
+            "peakFps": 119563.1
+        },
+        {
+            "clients": 100,
+            "authOk": 100,
+            "establishFailed": 0,
+            "frames": 582945,
+            "peakFps": 133493.8
+        },
+        {
+            "clients": 100,
+            "authOk": 100,
+            "establishFailed": 0,
+            "frames": 726027,
+            "peakFps": 144413
+        },
+        {
+            "clients": 100,
+            "authOk": 100,
+            "establishFailed": 0,
+            "frames": 647833,
+            "peakFps": 138490.1
+        }
+    ],
+    "server": {
+        "rssBeforeKb": 97104,
+        "rssAfterKb": 805676,
+        "rssPerConnKb": 708.6,
+        "cpuPct": 330.53,
+        "cpuPctPerConn": 0.3305,
+        "pids": [
+            661,
+            662,
+            663,
+            664
+        ]
+    }
+}
