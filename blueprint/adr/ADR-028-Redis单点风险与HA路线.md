@@ -16,7 +16,7 @@ Redis 是全服唯一跨进程事实源：多 scope token、服务注册与发�
   （run-worker 连接工厂与 metrics-exporter 同口径）；compose 缺省无密码栈仅限开发。
 - 故障语义分层（既有设计，本 ADR 显式记录）：建连/认证失败 → 请求级 500 兜底，**worker 不退出**
   （exit(1) 会引发 master 重启风暴）；Redis 恢复后无需重启即自愈。
-- 网络隔离：Redis 只在内网可达（部署清单见 docs/deployment.md §6）。
+- 网络隔离：Redis 只在内网可达（部署清单见 docs/deployment.md §7）。
 
 **第二期（已交付，见 [ADR-031](ADR-031-哨兵HA与连接自愈.md)）：哨兵 HA 与连接自愈**
 
@@ -38,11 +38,12 @@ Redis 是全服唯一跨进程事实源：多 scope token、服务注册与发�
 
 ## 影响 / 后果
 
-- 生产部署 checklist 新增 Redis 认证项（docs/deployment.md §6）；
+- 生产部署 checklist 新增 Redis 认证项（docs/deployment.md §7）；
 - 备份与恢复演练（docs/deployment.md §8）覆盖 Redis 持久化选择；
-- 第二期动工时以本 ADR 为基线立实现 ADR。
+- 第二期已以本 ADR 为基线立实现 ADR（[ADR-031](ADR-031-哨兵HA与连接自愈.md)）。
 
 ## 关联
 
 - token 存储：[ADR-012](ADR-012-RedisTokenStore提前落地.md)
-- 备份演练：[docs/deployment.md](../../docs/deployment.md) §7
+- 哨兵 HA 实现：[ADR-031](ADR-031-哨兵HA与连接自愈.md)
+- 备份演练：[docs/deployment.md](../../docs/deployment.md) §8

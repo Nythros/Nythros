@@ -73,7 +73,7 @@ php packages/demo/bin/verify-phase5.php
 | [security](docs/security.md) | 多 scope token、限流、GM 权限、安全清单 |
 | [performance](docs/performance.md) | 离线基准、压测、运行期采样、容量与硬件选型 |
 | [api-reference](docs/api-reference.md) | 公开 API 一览（脚本生成，`php tools/generate-api-docs.php`） |
-| [deployment](docs/deployment.md) | Docker 镜像、compose 部署、Prometheus 指标、生产清单 |
+| [deployment](docs/deployment.md) | Docker 镜像、compose 部署、Prometheus 指标、Redis 哨兵 HA、生产清单 |
 | [persistence-guide](docs/persistence-guide.md) | 存储适配器、归档管线、schema 建立与迁移约定 |
 
 **设计决策与演进**：[blueprint/](blueprint/README.md) —— 架构规范、ADR 决策记录与阶段验收/审计文档（篇目以目录为准）。

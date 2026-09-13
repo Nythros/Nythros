@@ -112,7 +112,7 @@
   `run-exporter.php --self-test` 离线自检;count>1 硬降 1 保 Stream 全序前提);④demo 双模式
   `NYTHROS_PERSIST_MODE`（缺省 `export`,export 下 attach 恢复读背包权威缺省开;`mysql` 保留旧直写口径,
   ArchivePipeline 与测试线束零改动）;bin/server `--parts` 增 `storage`,启动铁序 Redis→social→map→storage。
-  失败模式预案与丢失窗口契约写进 deployment §3/§6/§7.3（exporter 失联=报表老化不回档;worker 崩溃=
+  失败模式预案与丢失窗口契约写进 deployment §3/§7/§8.3（exporter 失联=报表老化不回档;worker 崩溃=
   丢 ≤30s 未冲刷增量,在线态 Redis 可恢复）。验证:新增 13 测（Inventory/ExportPipeline 契约 + 两形态
   phpredis 回复归一化实测校准——xReadGroup 实为 [stream=>[entryId=>fields]]）;E2E 带 exporter 实跑
   `verify-phase5` 11/11、`verify-mmorpg` 11/11（step8 领奖直查 MySQL potion=4 为导出链路铁证）。
@@ -162,7 +162,7 @@
 - 协议版本协商（ADR-027）：gateway/Map 双通道 auth 帧携带 `version`（PayloadKey 码表 83→84，TS 同步再生成）；
   `NYTHROS_MIN_CLIENT_VERSION` 启用最低版本守卫（token 不消费、拒绝于 authenticate 之前），缺省关闭。
 - Redis 认证与库选择：`NYTHROS_REDIS_PASSWORD` / `NYTHROS_REDIS_DB`（run-worker 与 metrics-exporter 同口径，ADR-028）。
-- 备份与恢复演练手册（docs/deployment.md §7）：MySQL/Redis 备份策略、恢复步骤、票据丢失专项、已知边界。
+- 备份与恢复演练手册（docs/deployment.md §8）：MySQL/Redis 备份策略、恢复步骤、票据丢失专项、已知边界。
 - 发布管线（ADR-019 §5，决策 B=subsplit）：`release.yml` 升级四段流水线——质量门禁+GitHub Release zip →
   `git subtree split` 推 `Nythros/engine`/`Nythros/framework` 拆分仓 → Packagist webhook 显式刷新 →
   npm（条件跳过）；monorepo 内部依赖 `@dev`→`^0.1`（path repo `options.versions` 注入 `0.1.x-dev`
