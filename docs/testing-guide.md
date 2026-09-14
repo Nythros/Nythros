@@ -33,6 +33,10 @@ packages/<pkg>/tests/<Module>/<ClassName>Test.php   # 与 src 的 Module 目录�
 
 - **内存桩优先**：网络/时钟/存储全部用内存实现（`InMemoryTokenStore`、`InMemoryStorage`、
   `SystemClock` 固定时刻），不做 IO。找不到契约的内存实现时先补一个（它本身也是对契约的可用性检验）。
+- **跨包共享替身走 nythros/testing**：调用记录型测试替身（`FakeConnectionHub`/`FakeTeamStore`/
+  `FakeGuildStore`/`FakeServiceRegistry`/`FakeTokenManager`/`FixedRandomSource` 等 12 个，
+  `Nythros\Testing` 命名空间）由 composer autoload 提供，各包测试直接 `use` 导入——**不要**
+  `require_once` 其他包的 tests 目录文件（跨包路径引用是已清理的耦合，见 UPGRADING.md 开发者迁移节）。
 - **种子化随机**：战斗随机数走种子化 RNG（framework Combat 模块）——测试里给固定种子断言确定性结果，
   不要在测试里 mock 掉随机源。
 - **断言行为而非实现**：断言「视野内收到 entity_enter」而不是「GridAOI 内部数组长度为 N」。

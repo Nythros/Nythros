@@ -21,6 +21,14 @@
 
 ### Added
 
+- **UPGRADING.md 升级指南 + mkdocs/README 接入**：集中沉淀破坏性变更的迁移说明（协议 v2 一次切换的
+  服务端/客户端迁移路径、哨兵 HA 可选增量、0.x 版本策略与 `@internal` 不承诺口径），mkdocs 站内
+  「工程实践」以 GitHub 链接收录（与 blueprint 同款仓库内文档模式）。
+- **共享测试 fakes 独立为 nythros/testing 开发包（测试基建，工程债收尾）**：原 framework/tests 的
+  FakeCluster/FakeSocial/CombatFakes 三个多类文件拆为 `Nythros\Testing` 命名空间 PSR-4 单类文件
+  （12 个测试替身），demo/engine 测试删除 `require_once __DIR__/../../framework/tests/*` 跨包路径
+  引用，改为 composer autoload（根 `require-dev` 消费，不入运行时依赖链）；phpstan 分析路径与
+  phpunit source 同步纳入。消除「framework 测试目录任何改动都会破坏 demo 测试」的跨包耦合。
 - **Redis 哨兵 HA 与连接自愈（[框架/Cluster + 部署 + 文档]，兑现 ADR-028 第二期，ADR-031）**：
   新增 `RedisConnector`（哨兵主库解析 + 连接追踪 + 主变**原地重指向** + 失活连接自动重连；未配置
   `NYTHROS_REDIS_SENTINELS` 即直连，开发行为不变）与 `ReplicaBarrier`（经济域权威写——货币/背包/
@@ -185,6 +193,17 @@
 
 ### Changed
 
+- **工程债三连收尾（[框架/Social + 框架/Actor + 测试基建]）：SocialService 域竖切 / Vitals 生命面
+  trait / 测试 fake 解耦（对应 Added 两条与 UPGRADING 开发者迁移节）**：
+  ① `SocialService`（1488 行）按域竖切——chat/team/guild/friend 四域迁入 `@internal` 响应器
+  （`ChatResponder`/`TeamResponder`/`GuildResponder`/`FriendResponder`），共享投递/会话/白名单底座
+  （`SocialContext`）与选频道器（`ChannelSelector`）独立成类；门面公开 API（构造签名 + 10 个
+  handle*/hub 方法）逐字节不变，新增内部类全部 `@internal`（api-reference 公开面零变化）。
+  ② `BasePlayer`/`BaseMonster` 重复的 hp/maxHp 生命周期收敛到 `Actor\Vitals` trait（props + hp/
+  maxHp/isDead/heal + settleDamage 结算核）：`hp ≤ maxHp`、扣血不为负等数值不变量单点定义；
+  takeDamage 模板方法留在各基类（受击/死亡钩子签名本就因域而异），行为逐字节等价
+  （BaseMonster heal 由读属性改调 maxHp()，其 maxHp() 即属性直返，语义相同）。
+  ③ 见 Added「nythros/testing 开发包」条目。
 - **协议 v2 一次切换：type 明文→1B 词表码 + 清单协商地基（[引擎/Protocol + 框架/Social + demo/装配 + client-js]，
   ADR-030，⚠️ breaking）**：线字节审计发现每帧传 14-16B 明文类型名（词表 typeCode 早已存在却只用于校验、
   从未上线——「枚举压缩」名不副实）。v2 定稿为**唯一线上形态**：魔数 `NX\0\x02`、type 字段 0xF3 +

@@ -16,7 +16,9 @@ Nythros 的玩法系统跑在两条线上：
   `--service=gateway|chat|team` 三角色部署（`packages/demo/config/deploy.yaml`：gateway 18285 /
   chat 18286 / team 18287），各角色进程连接表独立（对称直连）。帧路由集中在
   `SocialServer::handleAuthenticated()`（chat:send / team:* / map:enter / map:join / guild:* / friend:* /
-  leaderboard:top|rank），业务全部落在 `packages/framework/src/Social/SocialService.php`。
+  leaderboard:top|rank），业务落在 `packages/framework/src/Social/`：`SocialService` 为公开门面
+  （auth 握手/map:enter/map:join），四玩法域竖切为 `@internal` 响应器（`ChatResponder`/`TeamResponder`/
+  `GuildResponder`/`FriendResponder`），共享投递/会话底座 `SocialContext` 与选频道器 `ChannelSelector`。
 - **实时线（Map）**：移动/战斗/AOI/掉落/背包/邮件领取/任务帧——`packages/demo/src/MapServer.php`
   承载，走二进制批量协议（帧类型/负载字段经词表压缩，见 `packages/demo/src/Protocol/FrameType.php`）。
 
@@ -132,8 +134,8 @@ private 只投目标）。所有失败帧 `chat:error {code, message}` 带原 re
 - `team:disband {teamId}`：仅队长（403 not_leader）。
 
 所有失败映射 `team:error {code, message}`（返回码 0~9 → HTTP 码 + 语义串，映射表在
-`SocialService::teamErrorHttpCode/Message`）。硬编码参数：`TEAM_TTL = 600`、`MAX_TEAM_SIZE = 5`
-（SocialService 常量）；邀请条目 30s（RedisTeamStore Lua 内 `expiresAt = now + 30`）。
+`TeamResponder::teamErrorHttpCode/Message`）。硬编码参数：`TEAM_TTL = 600`、`MAX_TEAM_SIZE = 5`
+（TeamResponder 常量）；邀请条目 30s（RedisTeamStore Lua 内 `expiresAt = now + 30`）。
 
 **掉线超时语义**：掉线不清队伍、不写离队——队伍随 TTL（600s 无写操作）自然蒸发，成员
 uid-team 键同步过期。重连时 `handleAuth` ⑨ 恢复分组：`TeamStore::findByUid` 命中即重新

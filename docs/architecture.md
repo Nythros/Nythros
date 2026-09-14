@@ -27,8 +27,8 @@ Engine（契约 + 核心实现）
 
 - Actor 基座在 engine：`BaseActor`（绑实体 + 抽象 update）；framework 在其上给三个基类：
   `BasePlayer`（连接/uid/血量 + 钩子）、`BaseMonster`（AI 状态机 + 钩子）、`BaseNPC`（静态实体 + 交互）。
-- 战斗契约 `Damageable`：玩家与怪物共同实现的最小战斗面（hp / maxHp / takeDamage / heal / isDead），使战斗服务以统一签名承载双向攻击。
-- 业务模块（ADR-020 §3.1 上移）：`Combat`（CombatService/MonsterActor/掉落）、`Inventory`、`Social`（SocialService/ConnectionHub/TeamStore/GuildStore/LocationStore）、`Actor`（PlayerActor）、`Auth`（Identity）。
+- 战斗契约 `Damageable`：玩家与怪物共同实现的最小战斗面（hp / maxHp / takeDamage / heal / isDead），使战斗服务以统一签名承载双向攻击；血量生命周期收敛在共享 trait `Actor\Vitals`（hp ≤ maxHp 等数值不变量单点定义，合成 maxHp 口径由 BasePlayer 覆写）。
+- 业务模块（ADR-020 §3.1 上移）：`Combat`（CombatService/MonsterActor/掉落）、`Inventory`、`Social`（SocialService 门面 + @internal 域响应器 Chat/Team/Guild/FriendResponder + 共享底座 SocialContext/ChannelSelector + ConnectionHub/TeamStore/GuildStore/LocationStore）、`Actor`（PlayerActor）、`Auth`（Identity）。
 - 插件机制 `Nythros\Framework\Plugin`：官方插件（Skill / Item / Buff）经 `PluginRegistry::load` 走 register → enable 生命周期，数据定义经 Container 注入。
 - 脚手架 `make` CLI：`make:actor` / `make:skill` / `make:event` / `make:map` + 能力报告 `make:capabilities`（`CapabilityCatalog` 数据源，入口 `vendor/bin/make`）。
 

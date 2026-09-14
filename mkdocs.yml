@@ -73,6 +73,8 @@ nav:
       - 部署指南: deployment.md
       - 持久化指南: persistence-guide.md
       - Unity/C# 接入: unity-guide.md
+      # UPGRADING.md 正本在仓库根（与 CHANGELOG 并列），站内以 GitHub 链接跳转
+      - 升级指南: https://github.com/nythros/nythros/blob/master/UPGRADING.md
 
 plugins:
   - search

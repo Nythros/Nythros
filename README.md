@@ -15,6 +15,7 @@ Nythros 是一套 **PHP 游戏服务器引擎框架**：Actor 模型 + AOI 视�
 | [`packages/demo`](packages/demo) | **nythros/demo** 参考实现：deploy.yaml 拓扑、MapServer/SocialServer 装配、storage-exporter 导出进程、玩法数据三表、verify-* 端到端验收脚本 | engine + framework |
 | [`packages/client-js`](packages/client-js) | **@nythros/client** 官方 JS SDK：二进制协议编解码、登录链路、事件订阅/回执、插值引擎、断线重连（零依赖，Node ≥22 / 浏览器通用） | — |
 | [`packages/skeleton`](packages/skeleton) | **nythros/skeleton** create-project 入门套件：最小可运行游戏骨架（GridAOI 主城 + 全量广播副本）；由 `v*` tag subsplit 发布为 [Nythros/skeleton](https://github.com/Nythros/skeleton) 独立仓（ADR-019 镜像） | engine + framework |
+| [`packages/testing`](packages/testing) | **nythros/testing** 共享测试 fakes：跨包复用的调用记录型测试替身（`Nythros\Testing`）；仅 monorepo `require-dev` 消费，不入运行时依赖链 | engine + framework |
 
 依赖方向铁律：`Framework → Engine`、`Demo → Framework`；引擎不知道框架层存在（见 [docs/architecture.md](docs/architecture.md) §3）。
 
@@ -75,6 +76,7 @@ php packages/demo/bin/verify-phase5.php
 | [api-reference](docs/api-reference.md) | 公开 API 一览（脚本生成，`php tools/generate-api-docs.php`） |
 | [deployment](docs/deployment.md) | Docker 镜像、compose 部署、Prometheus 指标、Redis 哨兵 HA、生产清单 |
 | [persistence-guide](docs/persistence-guide.md) | 存储适配器、归档管线、schema 建立与迁移约定 |
+| [UPGRADING](UPGRADING.md) | 破坏性变更迁移指南（协议 v2 切换等） |
 
 **设计决策与演进**：[blueprint/](blueprint/README.md) —— 架构规范、ADR 决策记录与阶段验收/审计文档（篇目以目录为准）。
 

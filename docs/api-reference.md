@@ -5,7 +5,7 @@
 > 未标 `@internal` 的类/枚举（ADR-023/024）。`@internal` 实现类不构成 API 承诺，业务层只依赖 Contracts 接口。
 > 指南（用法与教程）见 [docs/ 索引](https://github.com/nythros/nythros/tree/master#文档索引)；本文件只做「有什么、叫什么、签名单什么」的索引。
 > 摘要中的 P 编号（P9/P11/P15…）是阶段验收记录的追溯锚点，对应 [blueprint/](https://github.com/nythros/nythros/tree/master/blueprint) 目录的编号验收文档。
-175 个公开符号（engine + framework）。
+174 个公开符号（engine + framework）。
 
 
 ## nythros/engine
@@ -439,17 +439,17 @@ Token 存储接口：定义 token 的持久化与五态判定契约。
 | `damageContributors(): array` | 伤害账本快照（按累计伤害降序；平局按先达序——arsort 保持键序稳定性由插入序保证）。 |
 | `damageLeader(): ?string` | 伤害账本最高者（击杀归属 damage_leader 裁决；空账本返回 null；平局取先达）。 |
 | `enterState(string $state): void` | 状态迁移：白名单校验，非法状态抛 InvalidArgumentException；DEAD 为终态，不再迁出。 |
-| `heal(int $amount): void` | 治疗：恢复生命值，钳制在 maxHp 内；已死不复活。 |
+| `heal(int $amount): void` | 治疗：恢复生命值，钳制在 maxHp() 口径内；已死不复活。 |
 | `hp(): int` |  |
 | `isDead(): bool` |  |
 | `lastAttacker(): ?string` | 最近一次伤害来源实体 id；未被命中过返回 null。 |
-| `maxHp(): int` |  |
+| `maxHp(): int` | 最大生命值上限：缺省即基础值；需要合成口径（装备/属性临时修正加成）的子类覆盖本方法， |
 | `monsterId(): string` |  |
 | `noteAttacker(string $attackerId): void` | 记录伤害来源（击杀归属绑定）：每次有效扣血前由结算方调用，死亡时以最后来源为击杀者。 |
 | `noteDamage(string $attackerId, int $amount): void` | 记入伤害账本（P13 多源归属）：每次有效扣血前由结算方按伤害量累加（非负钳制，0 伤害不入账）。 |
 | `setTarget(?string $targetId): void` | 设置/清除追击目标。 |
 | `setTickDivisor(int $divisor): void` | 设置分频（governor 每 base tick 重算指派）；非法值（<1）钳制为 1。 |
-| `takeDamage(int $amount): void` | 模板方法：扣血钳制归零；归零时迁移 DEAD 并幂等触发一次 onDeath。 |
+| `takeDamage(int $amount): void` | 模板方法：幂等短路（已死/无效伤害）后经 Vitals::settleDamage 结算扣血；归零时迁移 DEAD 并幂等触发一次 onDeath。 |
 | `targetId(): ?string` |  |
 | `tickDivisor(): int` |  |
 | `typeId(): string` | 怪物类型 id（如 'wolf'）：任务击杀进度源的匹配键；未指定时为空串。 |
@@ -479,14 +479,14 @@ NPC 基类：静态实体，无主动行为；交互由玩家触发 onInteract�
 | `detachConnection(): void` | 解除连接绑定。 |
 | `detachEquipment(): void` | 摘除装备栏：加成清零后同样收敛 hp（卸下减益装备可能压低上限）。 |
 | `equipment(): ?Nythros\Framework\Inventory\Equipment\Equipment` | 当前装备栏；未挂载为 null。 |
-| `heal(int $amount): void` | 治疗：恢复生命值，钳制在合成上限内；已死不复活。 |
+| `heal(int $amount): void` | 治疗：恢复生命值，钳制在 maxHp() 口径内；已死不复活。 |
 | `hp(): int` |  |
 | `initVitals(int $maxHp): void` | 初始化生命基线（P18 玩法数据外置，auth 挂载时一次性调用）：覆盖基础 maxHp 并回满—— |
 | `isDead(): bool` |  |
 | `maxHp(): int` | 合成最大生命值：基础 maxHp + 装备 maxHp 加成 + 属性临时修正和（D6 聚合口径 + R3 玩法批临时修正）。 |
 | `removeAttributeModifier(string $attribute, int $delta): void` | 回退一条属性临时修正（按施加时的同一增量对称回退）：归零键摘除，防止表无限膨胀。 |
 | `setTickDivisor(int $divisor): void` | 设置分频（governor 每 base tick 重算指派）；非法值（<1）钳制为 1。 |
-| `takeDamage(int $amount): void` | 模板方法：扣血钳制归零；从存活→死亡的那次伤害触发一次 onDeath。 |
+| `takeDamage(int $amount): void` | 模板方法：幂等短路（无效伤害/已死）后经 Vitals::settleDamage 结算扣血；从存活→死亡的那次伤害触发一次 onDeath。 |
 | `tickDivisor(): int` |  |
 | `uid(): ?string` | 玩家唯一标识；未绑定时为 null。 |
 | `update(): void` | 模板方法：每帧统一入口，交由子类 onTick 钩子实现具体帧逻辑。 |
@@ -1836,23 +1836,6 @@ Skill 插件：向 Container 注册 SkillRepository，并订阅 'skill.cast' 作
 | `invite(string $senderUid, string $targetUid, int $maxSize, int $teamTtl, float $now): array` |  |
 | `leave(string $uid, string $teamId, int $teamTtl): array` |  |
 | `reject(string $uid, string $teamId, int $teamTtl, float $now): array` |  |
-
-#### `SocialService`
-社交业务核心：auth（完整握手 + token 消费登录）/ chat 五语义 / team 状态机 / map:enter / map:join
-
-| 方法 | 说明 |
-|---|---|
-| `__construct(Nythros\Framework\Social\ConnectionHubInterface $hub, Nythros\Security\TokenManagerInterface $tokenManager, Nythros\Cluster\ServiceRegistryInterface $registry, Nythros\Security\AuthenticatorInterface $authenticator, Nythros\Framework\Social\LocationStoreInterface $location, Nythros\Framework\Social\GuildStoreInterface $guild, Nythros\Framework\Social\TeamStoreInterface $team, Nythros\Protocol\SerializerInterface $serializer, array $mapIds, array $endpointAddresses = [...], ?Nythros\Framework\Social\FriendStoreInterface $friend = NULL, ?int $minClientVersion = NULL, int $manifestVersion = 0)` | 组装社交业务依赖。 |
-| `handleAuth(string $clientId, Nythros\Protocol\Message $msg): void` | 认证登录（ADR-015 §1.4 完整流程）：authenticate → mapId 白名单 → 踢旧连新 → 恢复判定 → |
-| `handleChat(string $clientId, string $uid, Nythros\Protocol\Message $msg): void` | 聊天五语义（ADR-015 §1.5）：world/channel/team/guild/private，错误一律 chat:error 回发起方。 |
-| `handleClose(string $uid): void` | 连接关闭：写掉线标记（ADR-015 §1.8）。 |
-| `handleFriend(string $clientId, string $uid, Nythros\Protocol\Message $msg): void` | 好友五语义（R3 社交批）：friend:apply/accept/reject/remove/list，委托 FriendStore，返回码映射 friend:error。 |
-| `handleGuild(string $clientId, string $uid, Nythros\Protocol\Message $msg): void` | 帮派语义（ADR-015 §1.9 最小面 + R3 正式化面）：guild:join/leave 沿用最小实现； |
-| `handleMapEnter(string $clientId, string $uid, Nythros\Protocol\Message $msg): void` | map:enter 进图/重连凭证续签（ADR-015 §1.7）：mapId 白名单 → 选频道 → issue(['map']) → map:entered。 |
-| `handleMapJoin(string $clientId, string $uid, Nythros\Protocol\Message $msg): void` | map:join 进图/切图上报（ADR-015 §1.7）：白名单 → 退旧频道组 → 写位置快照 → joinGroup → map:joined。 |
-| `handleTeam(string $clientId, string $uid, Nythros\Protocol\Message $msg): void` | 组队状态机（ADR-015 §1.6）：invite/accept/reject/leave/disband，委托 TeamStore，返回码映射 team:error。 |
-| `handleTokenAuth(string $clientId, Nythros\Protocol\Message $msg, string $scope): void` | token 消费登录（ADR-021 §3.2 多 scope 兑现）：chat/team 角色对 gateway 完整握手签发的多 scope token |
-| `hub(): Nythros\Framework\Social\ConnectionHubInterface` | 暴露社交连接层门面（运行时入口读会话/清理时用）。 |
 
 #### `Nythros\Framework\Social\TeamStoreInterface`
 组队状态机存储契约（ADR-015 §1.6）：边界判定 + 读改写原子化，返回码枚举。

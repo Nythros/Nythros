@@ -77,6 +77,10 @@ abstract class BasePlayer extends BaseActor implements Damageable
 - `onDamaged(int $amount)`：每次有效扣血触发（属性同步 / 受击表现）。
 - `onDeath()`：死亡结算（标记待复活 / 回出生点）。
 
+> 血量生命周期（`hp/maxHp` 状态、`heal` 钳制、`settleDamage` 结算核）统一收敛在共享 trait
+> `Nythros\Framework\Actor\Vitals`——BasePlayer 只在其上叠加合成口径的 `maxHp()`（装备 +
+> 属性临时修正）；数值不变量（hp ≤ maxHp、扣血不为负）单点定义，基类不复写。
+
 ### 2.3 BaseMonster —— 怪物（AI 状态机 + 钩子）
 
 ```php
