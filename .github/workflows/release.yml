@@ -110,6 +110,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # 关键：不持久化内置 GITHUB_TOKEN。checkout 默认 persist-credentials: true，会往本地 git config
+          # 写 http.https://github.com/.extraheader（Authorization: basic <GITHUB_TOKEN>），该头优先级
+          # **高于** push URL 里内嵌的 PAT —— 于是下面的 push 以 github-actions[bot] 身份发出，对镜像仓
+          # 必然 403（v0.2.1-verify 实测：Permission to Nythros/framework.git denied to github-actions[bot]）。
+          persist-credentials: false
 
       - name: Split subdirectory
         run: |
@@ -133,6 +138,9 @@ jobs:
       - name: Push mirror (main + version tag)
         run: |
           test -n "${{ secrets.SUBSPLIT_TOKEN }}" || { echo "::error::SUBSPLIT_ENABLED=true 但 SUBSPLIT_TOKEN secret 未配置"; exit 1; }
+          # 防御性清理：即便 checkout 行为变化，也确保推送用 URL 内嵌 PAT 而非内置 GITHUB_TOKEN
+          # （extraheader 里的 Authorization 头会覆盖 URL 凭据，是「403 denied to github-actions[bot]」的根因）
+          git config --unset-all "http.https://github.com/.extraheader" 2>/dev/null || true
           git push --force \
             "https://x-access-token:${{ secrets.SUBSPLIT_TOKEN }}@github.com/Nythros/${{ matrix.package }}.git" \
             "refs/heads/subsplit-${GITHUB_REF_NAME}:refs/heads/main"

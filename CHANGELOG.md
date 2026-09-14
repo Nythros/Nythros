@@ -32,6 +32,15 @@
 
 ### Fixed
 
+- **发布线凭据修复：subsplit 推送以 `github-actions[bot]` 身份发出被 403（[CI/发布]，v0.2.1-verify 实测）**：
+  `actions/checkout` 默认 `persist-credentials: true`，会把内置 `GITHUB_TOKEN` 写进本地 git config 的
+  `http.https://github.com/.extraheader`（Authorization 头）；该头**优先级高于 push URL 里内嵌的 PAT**，
+  于是推送以工作流 bot 身份发出——`GITHUB_TOKEN` 只对当前仓库（Nythros/Nythros）有权限，对镜像仓
+  （Nythros/engine|framework|skeleton）必然 `403 Permission denied`（实测日志：
+  `Permission to Nythros/framework.git denied to github-actions[bot]`）。修复：subsplit 的 checkout 加
+  `persist-credentials: false`（凭据只随命令注入、不落本地 config），并在推送前加一道
+  `git config --unset-all http.https://github.com/.extraheader` 防御性清理。文档：§9.1 故障对照表补该症状
+  （「被拒身份是 `github-actions[bot]`」≠ PAT 权限问题，避免误诊）。
 - **Redis 集成测试「无服务时应 skip」契约修复（[工程实践/测试]，CI 实测暴露）**：Redis 集成测试的
   setUp 先 `new \Redis()` 再 connect、失败即 `markTestSkipped`——但 **PHPUnit 跳过测试后仍调用
   tearDown**，而 tearDown 的守卫 `if ($this->redis === null) return;` 对「已构造但未连上」的对象

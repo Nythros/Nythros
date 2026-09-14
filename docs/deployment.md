@@ -373,10 +373,23 @@ token。启用前先满足两个前置，再配置三处：
 |---|---|---|
 | 镜像仓没更新，Actions 里没有 `Subsplit` job | `SUBSPLIT_ENABLED` 未设或不是小写 `true` | 检查 Variables 页 |
 | `Subsplit` job 红，报 `SUBSPLIT_ENABLED=true 但 SUBSPLIT_TOKEN secret 未配置` | secret 漏配 | 补第 2 步 |
-| `Subsplit` job 红，push 被拒（403 / `Permission denied`） | PAT 权限缺 Contents: write、或没勾全三个仓、或已过期 | 重做第 1 步并更新 secret |
+| `Subsplit` job 红，push 被拒 **且身份是 `github-actions[bot]`**（`Permission to Nythros/xxx.git denied to github-actions[bot]`） | **不是 PAT 权限问题**：checkout 默认持久化的内置 `GITHUB_TOKEN`（`http.extraheader`）覆盖了 push URL 内嵌的 PAT，推送以工作流 bot 身份发出（见下方「04 凭据覆盖」）。 | 已在 workflow 修复（checkout `persist-credentials: false` + push 前清理 extraheader）；若复现检查这两处是否被改动 |
+| `Subsplit` job 红，push 被拒且身份是**你的账号** | PAT 权限缺 Contents: write、或没勾全三个仓、或已过期 | 重做第 1 步并更新 secret |
 | 镜像仓 main 更新了但 tag 没有 | 推送顺序中断（极少） | 在该 run 页点 **Re-run failed jobs** |
 | Packagist 长时间不刷新 | 镜像仓 webhook 失效 | 启用第 3 步，或去 Packagist 该包页点 **Update** |
 | npm 报 `E403` / `EPUBLISHCONFLICT` | token 类型不对（需 Automation）、或版本号未升 | 检查第 4 步前置 B 与版本纪律 |
+
+**凭据覆盖（上表第 3 行）的机制与修法**：`actions/checkout` 默认 `persist-credentials: true`，会往本地
+git config 写 `http.https://github.com/.extraheader = AUTHORIZATION: basic <GITHUB_TOKEN>`。git 发请求时
+该头**优先于** URL 里内嵌的凭据，因此 `https://x-access-token:${{ secrets.SUBSPLIT_TOKEN }}@github.com/...`
+里的 PAT 被完全旁路，请求以 `github-actions[bot]` 身份发出——而内置 token 只覆盖当前仓库，对镜像仓必
+403。修法两处（缺一不可地防回归）：
+
+1. subsplit job 的 checkout 加 `persist-credentials: false`（凭据仅随 checkout 命令注入，不落本地 config）；
+2. push 步骤开头防御性执行 `git config --unset-all http.https://github.com/.extraheader || true`。
+
+同类症状也适用于任何「workflow 里用 PAT 推其他仓库」的场景——排查口诀：**先看拒绝身份，不是自己的
+账号就是被内置 token 顶替了**。
 
 > 历史注记：ADR-019 当时按「两包（engine/framework）」编写，skeleton 纳入发布矩阵为后续演进（见 CHANGELOG 与
 > blueprint/21）。blueprint 是决策记录，不回改。
