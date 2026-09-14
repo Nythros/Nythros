@@ -9,3 +9,4 @@ parameters:
         - packages/skeleton/src
         - packages/skeleton/bin
         - packages/skeleton/client.php
+        - packages/testing/src

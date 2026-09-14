@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Nythros\Demo\Tests;
 
-require_once __DIR__ . '/../../framework/tests/FakeCluster.php';
-
 use Nythros\Actor\BaseActor;
 use Nythros\Aoi\GridAOI;
 use Nythros\Contracts\ActorInterface;
@@ -24,11 +22,11 @@ use Nythros\Framework\Plugin\Item\ItemDefinition;
 use Nythros\Framework\Plugin\Item\ItemRepository;
 use Nythros\Framework\Plugin\Skill\SkillRepository;
 use Nythros\Framework\Server\ConnectionRegistry;
-use Nythros\Framework\Tests\FixedRandomSource;
 use Nythros\Network\ServerInterface;
 use Nythros\Protocol\JsonBatchSerializer;
 use Nythros\Scheduler\RegionScheduler;
 use Nythros\Security\TokenManagerInterface;
+use Nythros\Testing\FixedRandomSource;
 use Nythros\World\SimpleEntityManager;
 use Nythros\World\World;
 use PHPUnit\Framework\TestCase;

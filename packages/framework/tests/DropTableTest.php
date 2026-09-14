@@ -4,10 +4,9 @@ declare(strict_types=1);
 
 namespace Nythros\Framework\Tests;
 
-require_once __DIR__ . '/CombatFakes.php';
-
 use Nythros\Framework\Combat\DropEntry;
 use Nythros\Framework\Combat\DropTable;
+use Nythros\Testing\FixedRandomSource;
 use PHPUnit\Framework\TestCase;
 
 /**

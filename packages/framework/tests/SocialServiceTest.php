@@ -4,9 +4,6 @@ declare(strict_types=1);
 
 namespace Nythros\Framework\Tests;
 
-require_once __DIR__ . '/FakeCluster.php';
-require_once __DIR__ . '/FakeSocial.php';
-
 use Nythros\Cluster\ServiceInstance;
 use Nythros\Framework\Social\GuildStoreInterface;
 use Nythros\Framework\Social\HubTransportInterface;
@@ -18,15 +15,23 @@ use Nythros\Protocol\Message;
 use Nythros\Security\AuthenticationException;
 use Nythros\Security\TokenRecord;
 use Nythros\Security\TokenStatus;
+use Nythros\Testing\FakeConnectionHub;
+use Nythros\Testing\FakeFriendStore;
+use Nythros\Testing\FakeGuildStore;
+use Nythros\Testing\FakeLocationStore;
+use Nythros\Testing\FakeServiceRegistry;
+use Nythros\Testing\FakeSocialAuthenticator;
+use Nythros\Testing\FakeTeamStore;
+use Nythros\Testing\FakeTokenManager;
 use PHPUnit\Framework\TestCase;
 
 /**
  * SocialServiceTest - 纯业务单测：auth 流程 / chat 五语义 / map:enter。
- * 组装策略：ConnectionHub/TeamStore/LocationStore/GuildStore/Authenticator 用 FakeSocial 记录调用与配置返回；
- * registry/token 复用 FakeCluster 的 FakeServiceRegistry/FakeTokenManager；序列化走真实 JsonSerializer。
+ * 组装策略：ConnectionHub/TeamStore/LocationStore/GuildStore/Authenticator 用 nythros/testing 的
+ * Nythros\Testing 调用记录替身；registry/token 复用 FakeServiceRegistry/FakeTokenManager；序列化走真实 JsonSerializer。
  * SocialServiceTest - pure business unit tests: auth flow / the five chat semantics / map:enter.
- * Assembly strategy: ConnectionHub/TeamStore/LocationStore/GuildStore/Authenticator use the FakeSocial fakes for call
- * recording and configured returns; registry/token reuse FakeCluster's FakeServiceRegistry/FakeTokenManager; the codec is the real JsonSerializer.
+ * Assembly strategy: ConnectionHub/TeamStore/LocationStore/GuildStore/Authenticator use the call-recording test
+ * doubles from nythros/testing (Nythros\Testing); registry/token reuse FakeServiceRegistry/FakeTokenManager; the codec is the real JsonSerializer.
  */
 final class SocialServiceTest extends TestCase
 {

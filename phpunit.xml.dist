@@ -8,6 +8,7 @@
             <directory>packages/engine/src</directory>
             <directory>packages/framework/src</directory>
             <directory>packages/demo/src</directory>
+            <directory>packages/testing/src</directory>
         </include>
     </source>
     <testsuites>

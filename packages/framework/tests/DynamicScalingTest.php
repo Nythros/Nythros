@@ -4,15 +4,19 @@ declare(strict_types=1);
 
 namespace Nythros\Framework\Tests;
 
-require_once __DIR__ . '/FakeCluster.php';
-require_once __DIR__ . '/FakeSocial.php';
-require_once __DIR__ . '/SocialServiceTest.php';
-
 use Nythros\Cluster\ServiceInstance;
 use Nythros\Framework\Gm\Command\DrainCommand;
 use Nythros\Framework\Gm\GmDrainHandlerInterface;
 use Nythros\Framework\Social\SocialService;
 use Nythros\Protocol\Message;
+use Nythros\Testing\FakeConnectionHub;
+use Nythros\Testing\FakeFriendStore;
+use Nythros\Testing\FakeGuildStore;
+use Nythros\Testing\FakeLocationStore;
+use Nythros\Testing\FakeServiceRegistry;
+use Nythros\Testing\FakeSocialAuthenticator;
+use Nythros\Testing\FakeTeamStore;
+use Nythros\Testing\FakeTokenManager;
 use PHPUnit\Framework\TestCase;
 
 /**

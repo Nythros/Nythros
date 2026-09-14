@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Nythros\Framework\Tests;
 
-require_once __DIR__ . '/CombatFakes.php';
-
 use Nythros\Actor\SimpleActorSystem;
 use Nythros\Aoi\GridAOI;
 use Nythros\Contracts\WorldInterface;
@@ -25,6 +23,10 @@ use Nythros\Framework\Plugin\Item\ItemRepository;
 use Nythros\Framework\Plugin\Skill\SkillDefinition;
 use Nythros\Framework\Plugin\Skill\SkillRepository;
 use Nythros\Scheduler\RegionScheduler;
+use Nythros\Testing\FixedRandomSource;
+use Nythros\Testing\FixedTeamMembership;
+use Nythros\Testing\RecordingActorLookup;
+use Nythros\Testing\RecordingBroadcaster;
 use Nythros\World\SimpleEntityManager;
 use Nythros\World\World;
 use PHPUnit\Framework\TestCase;

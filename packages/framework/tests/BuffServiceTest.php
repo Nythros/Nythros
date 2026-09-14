@@ -9,6 +9,7 @@ use Nythros\Framework\Combat\BuffService;
 use Nythros\Framework\Event\EventDispatcherInterface;
 use Nythros\Framework\Plugin\Buff\BuffDefinition;
 use Nythros\Framework\Plugin\Buff\BuffRepository;
+use Nythros\Testing\RecordingBroadcaster;
 use PHPUnit\Framework\TestCase;
 
 /**

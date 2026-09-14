@@ -1,0 +1,17 @@
+{
+    "name": "nythros/testing",
+    "description": "Nythros 共享测试 fakes：跨包复用的调用记录型测试替身（ConnectionHub/TeamStore/GuildStore/FriendStore/LocationStore/ServiceRegistry/TokenManager/RandomSource 等）。Shared test fakes for the Nythros monorepo: call-recording test doubles reused across packages.",
+    "license": "MIT",
+    "require": {
+        "php": ">=8.3",
+        "nythros/engine": "^0.1",
+        "nythros/framework": "^0.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "Nythros\\Testing\\": "src/"
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}

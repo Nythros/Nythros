@@ -4,9 +4,6 @@ declare(strict_types=1);
 
 namespace Nythros\Demo\Tests;
 
-require_once __DIR__ . '/../../framework/tests/FakeCluster.php';
-require_once __DIR__ . '/../../framework/tests/FakeSocial.php';
-
 use Nythros\Actor\SimpleActorSystem;
 use Nythros\Aoi\UniversalAOI;
 use Nythros\Cluster\ServiceInstance;
@@ -18,13 +15,6 @@ use Nythros\Framework\Server\ConnectionRegistry;
 use Nythros\Framework\Social\HubTransportInterface;
 use Nythros\Framework\Social\InMemoryConnectionHub;
 use Nythros\Framework\Social\SocialService;
-use Nythros\Framework\Tests\FakeFriendStore;
-use Nythros\Framework\Tests\FakeGuildStore;
-use Nythros\Framework\Tests\FakeLocationStore;
-use Nythros\Framework\Tests\FakeServiceRegistry;
-use Nythros\Framework\Tests\FakeSocialAuthenticator;
-use Nythros\Framework\Tests\FakeTeamStore;
-use Nythros\Framework\Tests\FakeTokenManager;
 use Nythros\Network\ConnectionInterface;
 use Nythros\Network\ServerInterface;
 use Nythros\Protocol\JsonBatchSerializer;
@@ -32,6 +22,13 @@ use Nythros\Protocol\JsonSerializer;
 use Nythros\Protocol\Message;
 use Nythros\Scheduler\RegionScheduler;
 use Nythros\Security\TokenRecord;
+use Nythros\Testing\FakeFriendStore;
+use Nythros\Testing\FakeGuildStore;
+use Nythros\Testing\FakeLocationStore;
+use Nythros\Testing\FakeServiceRegistry;
+use Nythros\Testing\FakeSocialAuthenticator;
+use Nythros\Testing\FakeTeamStore;
+use Nythros\Testing\FakeTokenManager;
 use Nythros\World\SimpleEntityManager;
 use Nythros\World\World;
 use PHPUnit\Framework\TestCase;
@@ -39,12 +36,12 @@ use PHPUnit\Framework\TestCase;
 /**
  * SocialServerTest - 社交运行时入口认证路由测试：auth 帧 token 路径与完整握手的分流。
  * 组装策略：Server/Connection 用 stub（回调捕获），hub 取真实 InMemoryConnectionHub + 记录型传输替身，
- * SocialService 依赖复用 framework 测试 fakes（FakeTokenManager/FakeServiceRegistry/FakeSocial 全家桶），
+ * SocialService 依赖复用 nythros/testing 共享测试替身（Nythros\Testing 的 FakeTokenManager/FakeServiceRegistry 等全家桶），
  * World 用真实 UniversalAOI 组装（社交层无实体/AOI 消费，仅满足骨架构造依赖）。
  * SocialServer runtime-entry auth-routing tests: the split between the auth frame's token path and the full handshake.
  * Assembly strategy: Server/Connection are stubbed (callback capture); the hub is a real InMemoryConnectionHub with a
  * recording transport substitute; SocialService dependencies reuse the framework test fakes (FakeTokenManager /
- * FakeServiceRegistry / the FakeSocial family); the World is assembled from a real UniversalAOI (the social tier consumes
+ * FakeServiceRegistry et al. from nythros/testing); the World is assembled from a real UniversalAOI (the social tier consumes
  * no entities/AOI — it only satisfies the skeleton constructor dependency).
  */
 final class SocialServerTest extends TestCase

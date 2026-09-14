@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Nythros\Demo\Tests;
 
-require_once __DIR__ . '/../../framework/tests/FakeCluster.php';
-
 use Nythros\Aoi\GridAOI;
 use Nythros\Contracts\ActorInterface;
 use Nythros\Contracts\ActorSystemInterface;
@@ -17,8 +15,6 @@ use Nythros\Demo\MapServer;
 use Nythros\Event\SimpleEventBus;
 use Nythros\Framework\Actor\PlayerActor;
 use Nythros\Framework\Server\ConnectionRegistry;
-use Nythros\Framework\Tests\FakeServiceRegistry;
-use Nythros\Framework\Tests\FakeTokenManager;
 use Nythros\Network\ConnectionClosedException;
 use Nythros\Network\ConnectionInterface;
 use Nythros\Network\ServerInterface;
@@ -27,6 +23,8 @@ use Nythros\Protocol\Message;
 use Nythros\Scheduler\RegionScheduler;
 use Nythros\Security\TokenRecord;
 use Nythros\Security\TokenStatus;
+use Nythros\Testing\FakeServiceRegistry;
+use Nythros\Testing\FakeTokenManager;
 use Nythros\World\SimpleEntityManager;
 use Nythros\World\World;
 use PHPUnit\Framework\TestCase;

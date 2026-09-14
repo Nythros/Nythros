@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "6e853bca4d4f5ba026bc732f831bbebf",
+    "content-hash": "5aece8c83dde4810d8a9932d9881e6f6",
     "packages": [
         {
             "name": "nythros/demo",
@@ -12,7 +12,7 @@
             "dist": {
                 "type": "path",
                 "url": "packages/demo",
-                "reference": "16c4ba303ce41275e64a2ae9faa3917c90dded6f"
+                "reference": "3405a958be15e4ce5ca3c70a6ec3ab88f7c132c8"
             },
             "require": {
                 "nythros/engine": "^0.1",
@@ -35,7 +35,7 @@
             "dist": {
                 "type": "path",
                 "url": "packages/engine",
-                "reference": "5ba0cc9226b6e742aff2e69c58625bcd78e7f567"
+                "reference": "35c3573740216ea0a6741ece0f470b1740738e9f"
             },
             "require": {
                 "php": ">=8.3",
@@ -79,7 +79,7 @@
             "dist": {
                 "type": "path",
                 "url": "packages/framework",
-                "reference": "89b0e65a84ea1d90cdc1bfa6dcb6c853a239840c"
+                "reference": "700eb94c29445190208bcbe8e9957c0bdbdedeab"
             },
             "require": {
                 "nythros/engine": "^0.1",
@@ -97,7 +97,7 @@
             "license": [
                 "MIT"
             ],
-            "description": "Nythros 游戏框架层（Game framework layer）：四基类（BaseActor/BasePlayer/BaseMonster/BaseNPC）+ 战斗模块（Combat/CombatService + MonsterActor + DropEntity/DropTable + EntityTypeIndex）+ 背包（Inventory）+ 社交模块（Social/SocialService + Team/Guild/Location 存储）+ 玩家 Actor（Actor/PlayerActor）+ 身份（Auth/Identity）+ 插件机制（PluginInterface/PluginRegistry + Skill/Item/Buff 官方插件）+ 实时服务器运行时（Server/RealtimeServer + ConnectionRegistry + FrameMerger）+ 部署（Deploy/DeployConfig）+ 观测（Observability/PerfSampler）+ 持久化管道（Persistence/ArchivePipeline）。",
+            "description": "Nythros 游戏框架层（Game framework layer）：三基类（BasePlayer/BaseMonster/BaseNPC，继承 engine 的 Actor\\BaseActor）+ 战斗模块（Combat/CombatService + MonsterActor + DropEntity/DropTable + EntityTypeIndex）+ 背包（Inventory）+ 社交模块（Social/SocialService + Team/Guild/Location 存储）+ 玩家 Actor（Actor/PlayerActor）+ 身份（Auth/Identity）+ 插件机制（PluginInterface/PluginRegistry + Skill/Item/Buff 官方插件）+ 实时服务器运行时（Server/RealtimeServer + ConnectionRegistry + FrameMerger）+ 部署（Deploy/DeployConfig）+ 观测（Observability/PerfSampler）+ 持久化管道（Persistence/ArchivePipeline）。",
             "transport-options": {
                 "relative": true
             }
@@ -108,7 +108,7 @@
             "dist": {
                 "type": "path",
                 "url": "packages/skeleton",
-                "reference": "32308a3d4afba5e6df5e3f8588224ae5627ab020"
+                "reference": "f92ba25df96e5032cfdfdf64993bdf118bb9536c"
             },
             "require": {
                 "nythros/engine": "^0.1",
@@ -933,6 +933,33 @@
                 "source": "https://github.com/nikic/PHP-Parser/tree/v5.8.0"
             },
             "time": "2026-07-04T14:30:18+00:00"
+        },
+        {
+            "name": "nythros/testing",
+            "version": "0.1.x-dev",
+            "dist": {
+                "type": "path",
+                "url": "packages/testing",
+                "reference": "16228eacd68f349adfeefa7dfdfd3da2068e4ebd"
+            },
+            "require": {
+                "nythros/engine": "^0.1",
+                "nythros/framework": "^0.1",
+                "php": ">=8.3"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Nythros\\Testing\\": "src/"
+                }
+            },
+            "license": [
+                "MIT"
+            ],
+            "description": "Nythros 共享测试 fakes：跨包复用的调用记录型测试替身（ConnectionHub/TeamStore/GuildStore/FriendStore/LocationStore/ServiceRegistry/TokenManager/RandomSource 等）。Shared test fakes for the Nythros monorepo: call-recording test doubles reused across packages.",
+            "transport-options": {
+                "relative": true
+            }
         },
         {
             "name": "phar-io/manifest",

@@ -4,9 +4,6 @@ declare(strict_types=1);
 
 namespace Nythros\Demo\Tests;
 
-require_once __DIR__ . '/../../framework/tests/FakeCluster.php';
-require_once __DIR__ . '/../../framework/tests/CombatFakes.php';
-
 use Nythros\Aoi\GridAOI;
 use Nythros\Contracts\ActorSystemInterface;
 use Nythros\Contracts\ClockInterface;
@@ -29,15 +26,15 @@ use Nythros\Framework\Plugin\Skill\SkillDefinition;
 use Nythros\Framework\Plugin\Skill\SkillRepository;
 use Nythros\Framework\Server\ConnectionRegistry;
 use Nythros\Framework\Server\MovementValidator;
-use Nythros\Framework\Tests\FakeServiceRegistry;
-use Nythros\Framework\Tests\FakeTokenManager;
-use Nythros\Framework\Tests\FixedRandomSource;
 use Nythros\Network\ConnectionInterface;
 use Nythros\Network\ServerInterface;
 use Nythros\Protocol\JsonBatchSerializer;
 use Nythros\Protocol\Message;
 use Nythros\Scheduler\RegionScheduler;
 use Nythros\Security\TokenRecord;
+use Nythros\Testing\FakeServiceRegistry;
+use Nythros\Testing\FakeTokenManager;
+use Nythros\Testing\FixedRandomSource;
 use Nythros\World\RoomInstanceManager;
 use Nythros\World\SimpleEntityManager;
 use Nythros\World\World;
