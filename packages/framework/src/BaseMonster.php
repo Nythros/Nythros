@@ -7,6 +7,7 @@ namespace Nythros\Framework;
 use InvalidArgumentException;
 use Nythros\Actor\BaseActor;
 use Nythros\Framework\Actor\TickCadence;
+use Nythros\Framework\Actor\Vitals;
 
 /**
  * 怪物基类：AI 状态机骨架 + 最小战斗面；takeDamage 模板方法内闭环死亡结算。
@@ -16,6 +17,7 @@ use Nythros\Framework\Actor\TickCadence;
 abstract class BaseMonster extends BaseActor implements Damageable
 {
     use TickCadence;
+    use Vitals;
 
     public const STATE_PATROL = 'patrol';
 
@@ -32,10 +34,6 @@ abstract class BaseMonster extends BaseActor implements Damageable
      * @var list<string>
      */
     private const VALID_STATES = [self::STATE_PATROL, self::STATE_CHASE, self::STATE_ATTACK, self::STATE_DEAD];
-
-    protected int $hp;
-
-    protected int $maxHp;
 
     protected string $aiState = self::STATE_PATROL;
 
@@ -79,16 +77,6 @@ abstract class BaseMonster extends BaseActor implements Damageable
     public function typeId(): string
     {
         return $this->typeId;
-    }
-
-    public function hp(): int
-    {
-        return $this->hp;
-    }
-
-    public function maxHp(): int
-    {
-        return $this->maxHp;
     }
 
     public function aiState(): string
@@ -193,8 +181,9 @@ abstract class BaseMonster extends BaseActor implements Damageable
     }
 
     /**
-     * 模板方法：扣血钳制归零；归零时迁移 DEAD 并幂等触发一次 onDeath。
-     * Template method: damage is clamped to zero; on zero, transitions to DEAD and triggers onDeath idempotently.
+     * 模板方法：幂等短路（已死/无效伤害）后经 Vitals::settleDamage 结算扣血；归零时迁移 DEAD 并幂等触发一次 onDeath。
+     * Template method: after the idempotent short-circuit (already dead / invalid damage), damage settles through
+     * Vitals::settleDamage; on zero, transitions to DEAD and triggers onDeath idempotently.
      *
      * @param int $amount 伤害量 The damage amount.
      */
@@ -203,31 +192,12 @@ abstract class BaseMonster extends BaseActor implements Damageable
         if ($amount <= 0 || $this->hp <= 0) {
             return; // 已死/无效伤害：幂等短路，不重复结算 Already dead / invalid damage: idempotent short-circuit, no repeated settlement.
         }
-        $this->hp = max(0, $this->hp - $amount);
+        $fatal = $this->settleDamage($amount);
         $this->onDamaged($this->lastAttackerId, $amount); // 受击钩子（R4 mmorpg 威胁表接入点） Hit hook (the R4 mmorpg threat-table hook point).
-        if ($this->hp === 0) {
+        if ($fatal) {
             $this->enterState(self::STATE_DEAD);
             $this->onDeath(); // 死亡结算：仅存活→死亡那次触发一次 Death settlement: triggered once on the transition hit.
         }
-    }
-
-    /**
-     * 治疗：恢复生命值，钳制在 maxHp 内；已死不复活。
-     * Heal: restore hit points clamped to maxHp; the dead are not revived.
-     *
-     * @param int $amount 治疗量 The heal amount.
-     */
-    public function heal(int $amount): void
-    {
-        if ($amount <= 0 || $this->hp <= 0) {
-            return;
-        }
-        $this->hp = min($this->maxHp, $this->hp + $amount);
-    }
-
-    public function isDead(): bool
-    {
-        return $this->hp <= 0;
     }
 
     /**

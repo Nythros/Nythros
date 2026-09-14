@@ -6,6 +6,7 @@ namespace Nythros\Framework;
 
 use Nythros\Actor\BaseActor;
 use Nythros\Framework\Actor\TickCadence;
+use Nythros\Framework\Actor\Vitals;
 use Nythros\Framework\Inventory\Equipment\Equipment;
 
 /**
@@ -20,14 +21,11 @@ use Nythros\Framework\Inventory\Equipment\Equipment;
 abstract class BasePlayer extends BaseActor implements Damageable
 {
     use TickCadence;
+    use Vitals;
 
     private ?string $connectionId = null;
 
     private ?string $uid = null;
-
-    protected int $hp = 100;
-
-    protected int $maxHp = 100;
 
     /** 装备栏挂载（缺省 null = 未装配装备系统，maxHp 退化为纯基础值） Mounted equipment set (default null = no equipment system, maxHp degrades to the pure base value). */
     private ?Equipment $equipment = null;
@@ -169,15 +167,12 @@ abstract class BasePlayer extends BaseActor implements Damageable
         $this->hp = $this->maxHp();
     }
 
-    public function hp(): int
-    {
-        return $this->hp;
-    }
-
     /**
      * 合成最大生命值：基础 maxHp + 装备 maxHp 加成 + 属性临时修正和（D6 聚合口径 + R3 玩法批临时修正）。
+     * 覆盖 Vitals::maxHp() 的基础口径，heal 等读上限的钳制自动跟随合成值。
      * The composed maximum hp: base maxHp + the equipment maxHp bonus + the summed temporary attribute modifiers
-     * (the D6 aggregation contract plus the R3 gameplay batch's temporary modifiers).
+     * (the D6 aggregation contract plus the R3 gameplay batch's temporary modifiers). Overrides Vitals::maxHp()'s
+     * base contract, so clamps reading the ceiling (heal etc.) follow the composed value automatically.
      */
     public function maxHp(): int
     {
@@ -196,8 +191,9 @@ abstract class BasePlayer extends BaseActor implements Damageable
     }
 
     /**
-     * 模板方法：扣血钳制归零；从存活→死亡的那次伤害触发一次 onDeath。
-     * Template method: damage is clamped to zero; the single hit that drops hp to zero triggers onDeath exactly once.
+     * 模板方法：幂等短路（无效伤害/已死）后经 Vitals::settleDamage 结算扣血；从存活→死亡的那次伤害触发一次 onDeath。
+     * Template method: after the idempotent short-circuit (invalid damage / already dead), damage settles through
+     * Vitals::settleDamage; the single hit that drops hp to zero triggers onDeath exactly once.
      *
      * @param int $amount 伤害量 The damage amount.
      */
@@ -206,30 +202,11 @@ abstract class BasePlayer extends BaseActor implements Damageable
         if ($amount <= 0 || $this->hp <= 0) {
             return; // 无效伤害/已死：幂等短路，不重复结算 Invalid damage / already dead: idempotent short-circuit, no repeated settlement.
         }
-        $this->hp = max(0, $this->hp - $amount);
+        $fatal = $this->settleDamage($amount);
         $this->onDamaged($amount);
-        if ($this->hp === 0) {
+        if ($fatal) {
             $this->onDeath();
         }
-    }
-
-    /**
-     * 治疗：恢复生命值，钳制在合成上限内；已死不复活。
-     * Heal: restore hit points clamped to the composed ceiling; the dead are not revived.
-     *
-     * @param int $amount 治疗量 The heal amount.
-     */
-    public function heal(int $amount): void
-    {
-        if ($amount <= 0 || $this->hp <= 0) {
-            return;
-        }
-        $this->hp = min($this->maxHp(), $this->hp + $amount);
-    }
-
-    public function isDead(): bool
-    {
-        return $this->hp <= 0;
     }
 
     /**
