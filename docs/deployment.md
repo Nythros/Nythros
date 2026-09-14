@@ -332,9 +332,17 @@ git tag v0.2.1-verify && git push github v0.2.1-verify
 ```
 
 然后看 `https://github.com/Nythros/Nythros/actions/workflows/release.yml`：`Release` job 绿 →
-`Subsplit packages` 三个矩阵 job（engine/framework/skeleton）全绿，即为成功。验证完记得清理：
-monorepo 与三个镜像仓删掉该 tag（镜像仓 `git push --delete <url> v0.2.1-verify`），本地
-`git tag -d v0.2.1-verify`。
+`Subsplit packages` 三个矩阵 job（engine/framework/skeleton）全绿，即为成功。`-verify` 后缀 tag 只验
+链路、**不产出发布副作用**（跳过 GitHub Release / npm / Packagist），但会**真推**三个镜像仓的
+`main` + 同名 tag——这正是要验证的环节（镜像仓 `main` 会在下次正式发版时被重新对齐）。
+
+> ⚠️ **改过 `release.yml` 后必须推新 tag 才生效**：workflow 文件取自 **tag 所在 commit**；
+> 「Re-run failed jobs」复用旧 commit 的旧 workflow，拾取不到任何修复（v0.2.1-verify 实测踩坑：
+> 修复 commit 在 master 上，重跑仍按 tag 指向的旧 commit 执行）。
+
+验证完记得清理：monorepo 与三个镜像仓删掉该 tag（镜像仓 `git push --delete <url> v0.2.1-verify`），
+本地 `git tag -d v0.2.1-verify`。验证跑若已把镜像仓 `main` 推高而你想立即回退，按第 9 节「手工补发」
+把最新正式 tag 的拆分量 `--force` 推回 `main` 即可（下次正式发版也会自然覆盖）。
 
 #### 第 3 步：Packagist（通常无需配置）
 

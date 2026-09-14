@@ -79,7 +79,10 @@ jobs:
           name: dist-${{ github.ref_name }}
           path: dist/
 
+      # 验证 tag（*-verify，见 deployment §9.1）跳过 Release 发布：验证跑只验门禁 + subsplit 推送链路，
+      # 不把测试版本推上 Releases 页（尤其不抢 Latest 标记）。
       - name: Create GitHub Release
+        if: ${{ !contains(github.ref_name, '-verify') }}
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*.zip
@@ -125,13 +128,17 @@ jobs:
       # skeleton 拆分专属：把依赖约束对齐到本次 tag 的次版本（如 v0.2.1 → ^0.2）。
       # 拆分树里没有 monorepo path 仓库，composer.json 本就能独立解析，这里只做版本纪律，
       # 保证「skeleton tag 与兼容的 engine/framework 次版本对齐」（Nythros/skeleton README 约定）。
+      # 用 `composer require --no-update` 而非 `composer config require.x`：后者在 Composer 2.10
+      # 直接报 "Setting require.x does not exist or is not supported by this command"（exit 1，
+      # v0.2.0 首发 run 的 skeleton job 即死于此步）；--no-update 只改 composer.json、不解析依赖
+      # 不联网，约束值未变时字节等价（实测 diff 为空）。runner 镜像自带 PHP 8.3 + Composer 2.10。
       - name: Sync skeleton dependency constraints to tag
         if: matrix.package == 'skeleton'
         run: |
           git checkout "subsplit-${GITHUB_REF_NAME}"
           MM="${GITHUB_REF_NAME#v}"; MM="${MM%.*}"
-          composer config require.nythros/engine "^${MM}"
-          composer config require.nythros/framework "^${MM}"
+          composer require --no-update --no-interaction \
+            "nythros/engine:^${MM}" "nythros/framework:^${MM}"
           git add composer.json
           git diff --cached --quiet || git commit -m "release: 依赖约束对齐 ${GITHUB_REF_NAME}"
 
@@ -153,11 +160,12 @@ jobs:
   # PACKAGIST_USERNAME = packagist 用户名。拆分仓若已在 packagist 注册并配 GitHub webhook，
   # 此 job 可跳过不配；两者都就绪时 webhook 与显式 POST 幂等共存。
   # 启用开关同 subsplit（vars.PACKAGIST_ENABLED）；needs 的 subsplit 被跳过时本 job 亦跳过。
+  # 验证 tag（*-verify）不触发发布侧副作用：只验门禁 + subsplit 推送链路。
   packagist:
     name: Notify Packagist
     runs-on: ubuntu-latest
     needs: subsplit
-    if: ${{ vars.PACKAGIST_ENABLED == 'true' }}
+    if: ${{ vars.PACKAGIST_ENABLED == 'true' && !contains(github.ref_name, '-verify') }}
     steps:
       - name: Update packages
         run: |
@@ -174,11 +182,12 @@ jobs:
   # 入 NPM_TOKEN。version 已是 0.1.0（非 dev-main），但 workflow 不会随 tag 自动改版本——每次发版前
   # 手动把 packages/client-js/package.json 的 version 升到对应版本（npm 拒绝重复版本号）。
   # 分步配置清单见 docs/deployment.md §9.1。
+  # 验证 tag（*-verify）不发布 npm：测试版本发布不可回收（同版本号不可重发）。
   npm:
     name: Publish @nythros/client
     runs-on: ubuntu-latest
     needs: release
-    if: ${{ vars.NPM_PUBLISH_ENABLED == 'true' }}
+    if: ${{ vars.NPM_PUBLISH_ENABLED == 'true' && !contains(github.ref_name, '-verify') }}
     defaults:
       run:
         working-directory: packages/client-js

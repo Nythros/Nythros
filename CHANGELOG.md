@@ -32,6 +32,15 @@
 
 ### Fixed
 
+- **发布线验证跑两处收尾修复（[CI/发布]，v0.2.1-verify 实测）**：① **skeleton 依赖对齐命令在
+  Composer 2.10 直接报错**——`composer config require.nythros/engine "^0.2"` 报
+  `Setting require.nythros/engine does not exist or is not supported by this command`（exit 1，
+  首发 run 的 skeleton 矩阵 leg 即死于此步）；改用 `composer require --no-update`（只改
+  composer.json、不解析依赖不联网；约束值未变时字节等价，实测 diff 为空，值变化时正确落盘）。
+  ② **验证 tag 不再产出任何发布副作用**——`vX.Y.Z-verify` 只验门禁 + subsplit 推送链路，跳过
+  GitHub Release / npm / Packagist 三类发布动作（v0.2.1-verify 首跑曾把测试版本推上 Releases 页并
+  抢 Latest 标记）。另注：**workflow 文件取自 tag 所在 commit**——修过 `release.yml` 后必须推新 tag
+  才会生效，「Re-run failed jobs」复用旧 commit 的 workflow（v0.2.1-verify 重跑不生效的原因）。
 - **发布线凭据修复：subsplit 推送以 `github-actions[bot]` 身份发出被 403（[CI/发布]，v0.2.1-verify 实测）**：
   `actions/checkout` 默认 `persist-credentials: true`，会把内置 `GITHUB_TOKEN` 写进本地 git config 的
   `http.https://github.com/.extraheader`（Authorization 头）；该头**优先级高于 push URL 里内嵌的 PAT**，
