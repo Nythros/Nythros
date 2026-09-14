@@ -17,7 +17,7 @@
 [blueprint/](blueprint/README.md) 按时间序保存了 32 篇阶段验收记录、ADR-001~026 决策记录与分层审计报告，
 即项目的演进档案——每个能力「为什么这么设计、验收证据是什么」都在对应阶段文档里。
 
-## [Unreleased]
+## [0.2.0] - 2026-09-14
 
 ### Added
 
@@ -350,5 +350,6 @@
 - 根 README、CHANGELOG、API 一览（`tools/generate-api-docs.php` 生成）、docker 镜像与部署文档、GM Web 控制台、Prometheus 指标端点、Unity/C# 参考客户端。
 - CI：php-cs-fixer + phpstan + @internal 门禁 + phpunit + benchmark 回归门禁（bench-gate）；Release workflow（tag 触发）。
 
-[Unreleased]: https://github.com/nythros/nythros/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/nythros/nythros/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/nythros/nythros/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/nythros/nythros/releases/tag/v0.1.0

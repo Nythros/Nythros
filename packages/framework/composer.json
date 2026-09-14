@@ -5,7 +5,7 @@
     "license": "MIT",
     "require": {
         "php": ">=8.3",
-        "nythros/engine": "^0.1"
+        "nythros/engine": "^0.2"
     },
     "autoload": {
         "psr-4": {

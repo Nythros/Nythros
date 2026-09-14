@@ -4,19 +4,19 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "5aece8c83dde4810d8a9932d9881e6f6",
+    "content-hash": "1550bc953ca4885ade8cc72cfc229b6b",
     "packages": [
         {
             "name": "nythros/demo",
-            "version": "0.1.x-dev",
+            "version": "0.2.x-dev",
             "dist": {
                 "type": "path",
                 "url": "packages/demo",
-                "reference": "3405a958be15e4ce5ca3c70a6ec3ab88f7c132c8"
+                "reference": "18c9335de65dfbff052c8def5cdbf5d0104a8e6c"
             },
             "require": {
-                "nythros/engine": "^0.1",
-                "nythros/framework": "^0.1",
+                "nythros/engine": "^0.2",
+                "nythros/framework": "^0.2",
                 "php": ">=8.3"
             },
             "type": "library",
@@ -31,11 +31,11 @@
         },
         {
             "name": "nythros/engine",
-            "version": "0.1.x-dev",
+            "version": "0.2.x-dev",
             "dist": {
                 "type": "path",
                 "url": "packages/engine",
-                "reference": "35c3573740216ea0a6741ece0f470b1740738e9f"
+                "reference": "3b055c050031678b869ffbf4c06b93ed3b40e786"
             },
             "require": {
                 "php": ">=8.3",
@@ -75,14 +75,14 @@
         },
         {
             "name": "nythros/framework",
-            "version": "0.1.x-dev",
+            "version": "0.2.x-dev",
             "dist": {
                 "type": "path",
                 "url": "packages/framework",
-                "reference": "700eb94c29445190208bcbe8e9957c0bdbdedeab"
+                "reference": "2e85229a272bfd567290d523281ae5b3bf12c73d"
             },
             "require": {
-                "nythros/engine": "^0.1",
+                "nythros/engine": "^0.2",
                 "php": ">=8.3"
             },
             "bin": [
@@ -104,15 +104,15 @@
         },
         {
             "name": "nythros/skeleton",
-            "version": "0.1.x-dev",
+            "version": "0.2.x-dev",
             "dist": {
                 "type": "path",
                 "url": "packages/skeleton",
-                "reference": "f92ba25df96e5032cfdfdf64993bdf118bb9536c"
+                "reference": "98718b7348f2ea71d930f2eeeb3e17445aaa7b11"
             },
             "require": {
-                "nythros/engine": "^0.1",
-                "nythros/framework": "^0.1",
+                "nythros/engine": "^0.2",
+                "nythros/framework": "^0.2",
                 "php": ">=8.3"
             },
             "type": "project",
@@ -936,15 +936,15 @@
         },
         {
             "name": "nythros/testing",
-            "version": "0.1.x-dev",
+            "version": "0.2.x-dev",
             "dist": {
                 "type": "path",
                 "url": "packages/testing",
-                "reference": "16228eacd68f349adfeefa7dfdfd3da2068e4ebd"
+                "reference": "3c1314b732501ddaf00f694f1f419788176f6207"
             },
             "require": {
-                "nythros/engine": "^0.1",
-                "nythros/framework": "^0.1",
+                "nythros/engine": "^0.2",
+                "nythros/framework": "^0.2",
                 "php": ">=8.3"
             },
             "type": "library",

@@ -8,7 +8,7 @@
 > `Nythros\Contracts` 契约接口自 v0.1.0 起冻结（变更须走 ADR）；engine/framework 的
 > `@internal` 符号不构成 API 承诺（CI 门禁 `composer internal` 强制），升级时可能无预告变动。
 
-## 0.1.0 → 0.2.x（协议 v2 一次切换）
+## 0.1.0 → 0.2.0（协议 v2 一次切换）
 
 唯一破坏性变更：**线协议 v2 一次切换（ADR-030）**。v1 帧不再被接受，服务端/客户端必须同步升级。
 
@@ -38,7 +38,7 @@
 - 自研客户端：按 [docs/protocol.md](docs/protocol.md) §2-§4/§7 新表接入；跨语言黄金向量（163B hex）
   钉死在 PHP `testV2GoldenBytesMatchClientJsCrossEncoder` 与 JS `codec.test.mjs`，改 wire 必两端同步重生成。
 
-## 0.1.0 → 0.2.x（可选新增，非破坏）
+## 0.1.0 → 0.2.0（可选新增，非破坏）
 
 以下为增量能力，按需采用；不 adopting 时行为与 0.1.0 一致：
 
@@ -47,7 +47,7 @@
   经济域权威写可另开 `NYTHROS_REDIS_AWAIT_REPLICAS=1`（副本确认屏障，缺省关闭）。
   详见 [docs/deployment.md](docs/deployment.md) §6/§8.4。
 
-## 开发者迁移（测试基建 0.2.x）
+## 开发者迁移（测试基建 0.2.0）
 
 - demo/engine 测试共用的测试替身迁入独立开发包 **nythros/testing**（`Nythros\Testing` 命名空间，
   PSR-4 单类文件）：测试代码删除 `require_once` 引入，改为 autoload + `use Nythros\Testing\...;`。
