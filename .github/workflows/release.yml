@@ -2,11 +2,10 @@
 #   ① release：质量门禁（phpunit/phpstan）→ composer 打包 zip → GitHub Release（永不因发布配置缺失而失败）
 #   ② subsplit：git subtree split 把 packages/engine、packages/framework、packages/skeleton 拆到
 #      Nythros/engine、Nythros/framework、Nythros/skeleton 独立仓（包 composer.json 在拆分仓根目录，
-#      Packagist 才可识别）——未配
-#      SUBSPLIT_TOKEN secret 时整个 job 跳过（渐进启用，不阻塞 ①）
+#      Packagist 才可识别）——未配 SUBSPLIT_TOKEN secret 时各 step 跳过、job 空跑（渐进启用，不阻塞 ①）
 #   ③ packagist：显式 POST 更新三个包的 webhook——未配 PACKAGIST_TOKEN 时跳过（若已在 Packagist
 #      后台为拆分仓配好 GitHub webhook，此 job 不配也无妨，双保险）
-#   ④ npm：@nythros/client 发布——未配 NPM_TOKEN 时跳过（npm org 暂不动的当前阶段即走此分支）
+#   ④ npm：@nythros/client 发布——未配 NPM_TOKEN 时各 step 跳过（npm org 暂不动的当前阶段即走此分支）
 # 人工前置清单见 blueprint/adr/ADR-019 §5 与 docs/deployment.md 发布节。
 name: Release
 
@@ -64,21 +63,29 @@ jobs:
   # 首推由本 job 完成；后续每次 tag 重算拆分并强制同步 main + 同名版本 tag。
   # 注意：Nythros/skeleton 已有手工推送的历史（建仓验证），首次 subsplit tag 会 --force 覆盖之（预期内，
   # 拆分树自此以 monorepo packages/skeleton 为唯一事实源）。
+  #  注意（历史缺陷修复）：secrets 上下文在 job 级 if 中不被 GitHub 允许（可用上下文仅
+  #  github/needs/vars/inputs），历史写法 `if: ${{ secrets.X != '' }}` 会让整个 workflow 加载期
+  #  校验失败——tag 运行 jobs=0、名称回退为文件路径、从不产出 Release。故改用「job 级 env 桥接
+  #  secret（env 允许 secrets）+ step 级 if: env.X != ''」的文档保证写法；未配 token 时各 step 跳过、
+  #  job 空跑（绿），渐进启用不阻塞 ①。
   subsplit:
     name: Subsplit packages to Nythros/{engine,framework,skeleton}
     runs-on: ubuntu-latest
     needs: release
-    if: ${{ secrets.SUBSPLIT_TOKEN != '' }}
+    env:
+      SUBSPLIT_TOKEN: ${{ secrets.SUBSPLIT_TOKEN }}
     strategy:
       matrix:
         package: [engine, framework, skeleton]
     steps:
       - name: Checkout (full history for subtree split)
+        if: ${{ env.SUBSPLIT_TOKEN != '' }}
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Split subdirectory
+        if: ${{ env.SUBSPLIT_TOKEN != '' }}
         run: |
           git config user.name "nythros-release-bot"
           git config user.email "release-bot@nythros.local"
@@ -88,7 +95,7 @@ jobs:
       # 拆分树里没有 monorepo path 仓库，composer.json 本就能独立解析，这里只做版本纪律，
       # 保证「skeleton tag 与兼容的 engine/framework 次版本对齐」（Nythros/skeleton README 约定）。
       - name: Sync skeleton dependency constraints to tag
-        if: matrix.package == 'skeleton'
+        if: ${{ env.SUBSPLIT_TOKEN != '' && matrix.package == 'skeleton' }}
         run: |
           git checkout "subsplit-${GITHUB_REF_NAME}"
           MM="${GITHUB_REF_NAME#v}"; MM="${MM%.*}"
@@ -98,13 +105,14 @@ jobs:
           git diff --cached --quiet || git commit -m "release: 依赖约束对齐 ${GITHUB_REF_NAME}"
 
       - name: Push mirror (main + version tag)
+        if: ${{ env.SUBSPLIT_TOKEN != '' }}
         run: |
           git push --force \
-            "https://x-access-token:${{ secrets.SUBSPLIT_TOKEN }}@github.com/Nythros/${{ matrix.package }}.git" \
+            "https://x-access-token:${SUBSPLIT_TOKEN}@github.com/Nythros/${{ matrix.package }}.git" \
             "refs/heads/subsplit-${GITHUB_REF_NAME}:refs/heads/main"
           git tag -f "${GITHUB_REF_NAME}" "subsplit-${GITHUB_REF_NAME}"
           git push --force \
-            "https://x-access-token:${{ secrets.SUBSPLIT_TOKEN }}@github.com/Nythros/${{ matrix.package }}.git" \
+            "https://x-access-token:${SUBSPLIT_TOKEN}@github.com/Nythros/${{ matrix.package }}.git" \
             "refs/tags/${GITHUB_REF_NAME}"
 
   # packagist 显式触发（可选双保险）：PACKAGIST_TOKEN = packagist.com/profile 的 API token，
@@ -115,42 +123,50 @@ jobs:
     runs-on: ubuntu-latest
     needs: subsplit
     # needs 的 subsplit 被跳过时本 job 亦被跳过（默认行为即符合预期：拆分未启用则包不存在）
+    env:
+      PACKAGIST_TOKEN: ${{ secrets.PACKAGIST_TOKEN }}
+      PACKAGIST_USERNAME: ${{ secrets.PACKAGIST_USERNAME }}
     steps:
       - name: Update packages
-        if: ${{ secrets.PACKAGIST_TOKEN != '' }}
+        if: ${{ env.PACKAGIST_TOKEN != '' }}
         run: |
           for pkg in engine framework skeleton; do
-            curl -sf -X POST "https://packagist.org/api/update-package?username=${{ secrets.PACKAGIST_USERNAME }}&apiToken=${{ secrets.PACKAGIST_TOKEN }}" \
+            curl -sf -X POST "https://packagist.org/api/update-package?username=${PACKAGIST_USERNAME}&apiToken=${PACKAGIST_TOKEN}" \
               -d "repository[url]=https://github.com/Nythros/${pkg}" \
               && echo "packagist updated: nythros/${pkg}"
           done
 
   # npm 自动发布：@nythros/client 随 v* tag 发布（需 repo secret NPM_TOKEN；test/ 不在 files
-  # 清单，包体干净）。npm 侧暂不启用：不配 secret 即整 job 跳过，不产生失败。
+  # 清单，包体干净）。npm 侧暂不启用：不配 secret 即各 step 跳过，不产生失败。
   # 启用前置：npmjs.com 注册 @nythros org + package.json 去 "version": "dev-main"（ProtocolVocabulary
   # 守卫要求 0.1.0，需同步 PHP 枚举并跑 phpunit）+ Automation token 入 NPM_TOKEN。
   npm:
     name: Publish @nythros/client
     runs-on: ubuntu-latest
     needs: release
-    if: ${{ secrets.NPM_TOKEN != '' }}
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     defaults:
       run:
         working-directory: packages/client-js
     steps:
       - name: Checkout
+        if: ${{ env.NPM_TOKEN != '' }}
         uses: actions/checkout@v4
 
       - name: Setup Node
+        if: ${{ env.NPM_TOKEN != '' }}
         uses: actions/setup-node@v4
         with:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Tests (node:test)
+        if: ${{ env.NPM_TOKEN != '' }}
         run: npm test
 
       - name: Publish
+        if: ${{ env.NPM_TOKEN != '' }}
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
