@@ -259,7 +259,7 @@ git tag v0.1.1 && git push origin v0.1.1
 zip 附件）→ **git subtree split** 把三个 `packages/*` 子树强推镜像仓 `main` + 同名版本 tag（skeleton 拆分时
 自动把依赖约束对齐到 tag 次版本）→ Packagist 通知 → npm（@nythros/client，配了 token 才启用）。
 
-三条纪律：
+四条纪律：
 
 1. **镜像仓只读**：直接向 Nythros/engine|framework|skeleton 的提交会在下一个 tag 被强推覆盖。所有改动
    （含 skeleton 文档）都发生在 monorepo `packages/` 下。
@@ -289,11 +289,99 @@ zip 附件）→ **git subtree split** 把三个 `packages/*` 子树强推镜像
    会做 create-project 组合冒烟复核。**注意镜像仓 `main` 必须与 tag 同步推进**——只推 tag 会让
    `dev-main` 与发行版内容脱节。
 
+### 9.1 全自动发布配置（一次性，照抄清单）
+
+目标：打 tag 后四段全自动跑完，人工零干预。以下每项都写明**在哪个库、哪个页面、填什么**。
+唯一必须配置的是两组（第 1、2 步）；Packagist 当前已自动（第 3 步仅当失效时启用）；npm 暂缓
+（第 4 步，前置就绪后再开）。
+
+> 动手前先确认：**三组开关/secret 都配在 monorepo 仓库 `Nythros/Nythros` 上**，不是镜像仓。
+> 镜像仓只读，不配任何东西。
+
+#### 第 1 步：创建 PAT（推三个镜像仓的凭证）
+
+| 项 | 内容 |
+|---|---|
+| 在哪里创建 | GitHub 个人账号：右上头像 → **Settings** → **Developer settings**（最左栏底部）→ **Personal access tokens** → **Fine-grained tokens** → **Generate new token** |
+| Token name | `nythros-release-subsplit`（名字随意，仅自己可见） |
+| Expiration | 建议 90 天或自定义；到期前重新生成并在 secret 里更新同名字段即可，不影响流程 |
+| Resource owner | **Nythros**（组织；下拉里选组织而非个人） |
+| Repository access | 选 **Only select repositories** → 勾选 `Nythros/engine`、`Nythros/framework`、`Nythros/skeleton` |
+| Permissions | 展开 **Repository permissions** → 只改一项：**Contents = Read and write**；**Workflows = Read and write**（镜像仓根有 `.github/workflows/`，缺它会推不上去）；其余保持 No access |
+| 产出 | 点 **Generate token**，复制 `github_pat_...`（只显示一次，离开页面不可再查） |
+
+备选（不想用 fine-grained 时）：**Tokens (classic)** → Generate new token (classic) → 勾 `repo` 全量
+scope 即可（权限更宽，够用但不如 fine-grained 最小化）。
+
+#### 第 2 步：在 monorepo 存 secret + 开开关
+
+两个都在同一个页面：`Nythros/Nythros` → **Settings** → 左栏 **Secrets and variables** → **Actions**。
+
+| 页签 | 操作 | Name | Value |
+|---|---|---|---|
+| **Secrets** | **New repository secret** | `SUBSPLIT_TOKEN` | 粘贴第 1 步的 PAT |
+| **Variables** | **New repository variable** | `SUBSPLIT_ENABLED` | `true`（小写字符串，不要引号） |
+
+配完这两项，下一次打 tag 就会自动完成：GitHub Release → 三个镜像仓 main + tag 强推 → Packagist
+自动抓取（webhook 已在镜像仓侧配好，实测秒级到分钟级生效）。
+
+**验证（不改任何代码）**：等下次正常发版，或临时验证时执行
+
+```bash
+git tag v0.2.1-verify && git push github v0.2.1-verify
+```
+
+然后看 `https://github.com/Nythros/Nythros/actions/workflows/release.yml`：`Release` job 绿 →
+`Subsplit packages` 三个矩阵 job（engine/framework/skeleton）全绿，即为成功。验证完记得清理：
+monorepo 与三个镜像仓删掉该 tag（镜像仓 `git push --delete <url> v0.2.1-verify`），本地
+`git tag -d v0.2.1-verify`。
+
+#### 第 3 步：Packagist（通常无需配置）
+
+三个镜像仓的 Packagist webhook **已经工作**（v0.2.0 实测：推送后数分钟内三包均自动出现 v0.2.0），
+因此默认**不需要** `PACKAGIST_ENABLED`。只有出现「镜像仓已更新但 Packagist 长时间不刷新」时才启用
+双保险（同在 `Nythros/Nythros` → Settings → Secrets and variables → Actions）：
+
+| 页签 | Name | Value |
+|---|---|---|
+| Secrets | `PACKAGIST_USERNAME` | packagist.org 的用户名 |
+| Secrets | `PACKAGIST_TOKEN` | packagist.org → Profile → **API Token** 页显示的 token |
+| Variables | `PACKAGIST_ENABLED` | `true` |
+
+#### 第 4 步：npm 发布 @nythros/client（可选，前置未就绪时保持关闭）
+
+当前 `packages/client-js/package.json` 已是 `0.1.0` 正式版号（不再是 `dev-main`），npm 侧只差组织与
+token。启用前先满足两个前置，再配置三处：
+
+1. **前置 A**：在 [npmjs.com](https://www.npmjs.com) 注册 `@nythros` 组织（或改用你已有的 scope，
+   同步改 `packages/client-js/package.json` 的 `name`）。
+2. **前置 B**：npmjs.com → 头像 → **Access Tokens** → **Generate New Token** → 选 **Automation**
+   （Automation 类型专为 CI，绕过 2FA 交互），复制 `npm_...`。
+3. **配置**（`Nythros/Nythros` → Settings → Secrets and variables → Actions）：
+
+| 页签 | Name | Value |
+|---|---|---|
+| Secrets | `NPM_TOKEN` | 前置 B 的 Automation token |
+| Variables | `NPM_PUBLISH_ENABLED` | `true` |
+
+**版本纪律**：workflow 发布的是 `package.json` 里的 `version`，不会随 tag 自动改。每次发版前需手动
+把 `packages/client-js/package.json` 升到与 tag 对应的版本（npm 不允许重复版本号，重复发布直接失败）。
+
+#### 附：故障对照表
+
+| 症状 | 原因 | 处理 |
+|---|---|---|
+| 镜像仓没更新，Actions 里没有 `Subsplit` job | `SUBSPLIT_ENABLED` 未设或不是小写 `true` | 检查 Variables 页 |
+| `Subsplit` job 红，报 `SUBSPLIT_ENABLED=true 但 SUBSPLIT_TOKEN secret 未配置` | secret 漏配 | 补第 2 步 |
+| `Subsplit` job 红，push 被拒（403 / `Permission denied`） | PAT 权限缺 Contents: write、或没勾全三个仓、或已过期 | 重做第 1 步并更新 secret |
+| 镜像仓 main 更新了但 tag 没有 | 推送顺序中断（极少） | 在该 run 页点 **Re-run failed jobs** |
+| Packagist 长时间不刷新 | 镜像仓 webhook 失效 | 启用第 3 步，或去 Packagist 该包页点 **Update** |
+| npm 报 `E403` / `EPUBLISHCONFLICT` | token 类型不对（需 Automation）、或版本号未升 | 检查第 4 步前置 B 与版本纪律 |
+
 > 历史注记：ADR-019 当时按「两包（engine/framework）」编写，skeleton 纳入发布矩阵为后续演进（见 CHANGELOG 与
 > blueprint/21）。blueprint 是决策记录，不回改。
 >
 > v0.2.0 注记：本次发版即经「手工补发」通道完成（当时 `SUBSPLIT_ENABLED`/`SUBSPLIT_TOKEN` 尚未配置）。
 > 三个镜像仓 main + v0.2.0 tag 已就位，Packagist 三包均显示 v0.2.0，`composer require nythros/framework:^0.2`
-> 与 `composer create-project nythros/skeleton` 实测通过。后续发版建议在仓库 Settings 配好开关与 token，
-> 走全自动通道。
+> 与 `composer create-project nythros/skeleton` 实测通过。后续发版走第 9.1 节配置的全自动通道。
 

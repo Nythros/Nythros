@@ -162,8 +162,10 @@ jobs:
 
   # npm 自动发布：@nythros/client 随 v* tag 发布（需 repo secret NPM_TOKEN；test/ 不在 files
   # 清单，包体干净）。启用开关 vars.NPM_PUBLISH_ENABLED。
-  # 启用前置：npmjs.com 注册 @nythros org + package.json 去 "version": "dev-main"（ProtocolVocabulary
-  # 守卫要求 0.1.0，需同步 PHP 枚举并跑 phpunit）+ Automation token 入 NPM_TOKEN。
+  # 启用前置：npmjs.com 注册 @nythros org（或改 package.json 的 name 到自有 scope）+ Automation token
+  # 入 NPM_TOKEN。version 已是 0.1.0（非 dev-main），但 workflow 不会随 tag 自动改版本——每次发版前
+  # 手动把 packages/client-js/package.json 的 version 升到对应版本（npm 拒绝重复版本号）。
+  # 分步配置清单见 docs/deployment.md §9.1。
   npm:
     name: Publish @nythros/client
     runs-on: ubuntu-latest
