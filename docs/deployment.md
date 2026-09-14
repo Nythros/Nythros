@@ -273,6 +273,27 @@ zip 附件）→ **git subtree split** 把三个 `packages/*` 子树强推镜像
    `secrets` 上下文在 job 级 `if` 中不被允许（可用仅 `github`/`needs`/`vars`/`inputs`），而 secrets 注入
    job 级 `env` 后未定义项不存在（非空串），`env.X != ''` 判断恒真会误启用 job。
 
+4. **手工补发（token/开关未配时的等效通道）**：subsplit 未启用（缺 `SUBSPLIT_ENABLED` 变量或
+   `SUBSPLIT_TOKEN` secret）时，GitHub Release 仍正常产出，但三个镜像仓不会更新。此时可用本地 SSH
+   凭证手工执行与 workflow 等价的三条命令（以 v0.2.0 / engine 为例）：
+
+   ```bash
+   git subtree split -P packages/engine -b subsplit-v0.2.0-engine v0.2.0
+   git push git@github.com:Nythros/engine.git refs/heads/subsplit-v0.2.0-engine:refs/heads/main
+   git tag -a mirror-engine-v0.2.0 -m "Nythros v0.2.0" subsplit-v0.2.0-engine
+   git push git@github.com:Nythros/engine.git refs/tags/mirror-engine-v0.2.0:refs/tags/v0.2.0
+   ```
+
+   framework/skeleton 同理（skeleton 无额外依赖对齐步骤：monorepo 里的约束本就是 `^0.2`）。
+   推送后 Packagist 经 webhook 自动抓取（已注册的包通常数秒内可见新版本）；skeleton 镜像仓自带 CI
+   会做 create-project 组合冒烟复核。**注意镜像仓 `main` 必须与 tag 同步推进**——只推 tag 会让
+   `dev-main` 与发行版内容脱节。
+
 > 历史注记：ADR-019 当时按「两包（engine/framework）」编写，skeleton 纳入发布矩阵为后续演进（见 CHANGELOG 与
 > blueprint/21）。blueprint 是决策记录，不回改。
+>
+> v0.2.0 注记：本次发版即经「手工补发」通道完成（当时 `SUBSPLIT_ENABLED`/`SUBSPLIT_TOKEN` 尚未配置）。
+> 三个镜像仓 main + v0.2.0 tag 已就位，Packagist 三包均显示 v0.2.0，`composer require nythros/framework:^0.2`
+> 与 `composer create-project nythros/skeleton` 实测通过。后续发版建议在仓库 Settings 配好开关与 token，
+> 走全自动通道。
 

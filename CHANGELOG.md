@@ -19,6 +19,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- **v0.2.0 补发三个镜像仓与 Packagist（[发布/运维]）**：v0.2.0 首发时 subsplit 未启用（缺
+  `SUBSPLIT_ENABLED` 变量与 `SUBSPLIT_TOKEN` secret），GitHub Release 正常产出但 Nythros/engine、
+  Nythros/framework、Nythros/skeleton 三仓停留 v0.1.0。本次经「手工补发」通道（`git subtree split`
+  + SSH 推 main/tag，与 workflow 等价）完成：三仓 `main` 推进至 v0.2.0 内容、`v0.2.0` tag 就位；
+  Packagist 三包均上线 v0.2.0（framework/skeleton 依赖解析验证通过）；skeleton 镜像仓自带 CI
+  （Packagist 真实安装 + create-project 冒烟）在其新 `main` 上通过。实测：
+  `composer require nythros/framework:^0.2` 与 `composer create-project nythros/skeleton` 均可装。
+  手工补发流程与注意事项（main 须与 tag 同步推进）已写入 docs/deployment.md 发布节。
+
 ### Fixed
 
 - **Redis 集成测试「无服务时应 skip」契约修复（[工程实践/测试]，CI 实测暴露）**：Redis 集成测试的
