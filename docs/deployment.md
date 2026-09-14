@@ -265,9 +265,13 @@ zip 附件）→ **git subtree split** 把三个 `packages/*` 子树强推镜像
    （含 skeleton 文档）都发生在 monorepo `packages/` 下。
 2. **skeleton 只在稳定 tag 同步**：engine/framework 的日常 dev 迭代不流入 skeleton；每次发布同时刷新
    skeleton 的 Packagist 冒烟（其仓库 CI：create-project 组合 → launch → client 断言）。
-3. **Secret 前置**（仓库 Settings → Secrets and variables → Actions）：`SUBSPLIT_TOKEN`（对三个镜像仓有
+3. **Secret 与开关前置**（仓库 Settings → Secrets and variables → Actions）：`SUBSPLIT_TOKEN`（对三个镜像仓有
    Contents: write 的 PAT）、可选 `PACKAGIST_USERNAME`/`PACKAGIST_TOKEN`（拆分仓未配 Packagist webhook 时
-   的双保险）、可选 `NPM_TOKEN`。缺哪个对应 job 跳过哪个，不阻塞 GitHub Release。
+   的双保险）、可选 `NPM_TOKEN`。**启用开关走 repository variables**（与 secret 分开配置）：
+   `SUBSPLIT_ENABLED` / `PACKAGIST_ENABLED` / `NPM_PUBLISH_ENABLED`，置为字符串 `true` 才启用对应 job
+   （未设即整个 job 跳过，不阻塞 GitHub Release）。开关用 variable 而非 secret 判断是 GitHub 的硬约束：
+   `secrets` 上下文在 job 级 `if` 中不被允许（可用仅 `github`/`needs`/`vars`/`inputs`），而 secrets 注入
+   job 级 `env` 后未定义项不存在（非空串），`env.X != ''` 判断恒真会误启用 job。
 
 > 历史注记：ADR-019 当时按「两包（engine/framework）」编写，skeleton 纳入发布矩阵为后续演进（见 CHANGELOG 与
 > blueprint/21）。blueprint 是决策记录，不回改。

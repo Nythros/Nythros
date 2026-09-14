@@ -17,6 +17,18 @@
 [blueprint/](blueprint/README.md) 按时间序保存了 32 篇阶段验收记录、ADR-001~026 决策记录与分层审计报告，
 即项目的演进档案——每个能力「为什么这么设计、验收证据是什么」都在对应阶段文档里。
 
+## [Unreleased]
+
+### Fixed
+
+- **发布线启用开关与文档对齐（[CI/发布]，v0.2.0 首发后收尾）**：v0.2.0 发布实测暴露 subsplit 三段
+  matrix job 全失败——「job 级 env 桥接 secret + `step.if: env.X != ''`」不可靠（未定义 secret 注入
+  env 后该变量不存在而非空串，判断恒真 → 未配 token 的 job 照跑并在 push 处无凭证失败）。启用开关
+  最终改走 repository variables：`vars.SUBSPLIT_ENABLED` / `vars.PACKAGIST_ENABLED` /
+  `vars.NPM_PUBLISH_ENABLED` 置 `true` 启用，secret 仅在已启用 job 内引用，push 前显式校验 token
+  非空（缺配置给可读 `::error::`）。同步 docs/deployment.md Secret 前置节与 ADR-019 实现注记。
+  v0.2.0 首发四段实跑：release 全绿并产出**仓库首个 GitHub Release**（engine/framework zip 双资产）。
+
 ## [0.2.0] - 2026-09-14
 
 ### Added
