@@ -21,6 +21,31 @@ jobs:
   release:
     name: Release ${{ github.ref_name }}
     runs-on: ubuntu-latest
+    # service 容器与 CI 对齐：release 门禁跑 phpunit 全量，含 Redis/MySQL 集成测试。
+    # 历史缺失该声明时，无服务环境的集成用例与依赖在线态的守卫用例会硬失败——
+    # 「声称跑质量门禁却不给门禁要的环境」是历史缺陷（CI 绿、Release 红同提交可证）。
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_DATABASE: nythros
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,7 +54,7 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: "8.3"
-          extensions: redis
+          extensions: redis, pdo_mysql # 与 CI 对齐：pdo_mysql 供 MySqlStorage 集成测试真跑
           coverage: none
 
       - name: Install dependencies
