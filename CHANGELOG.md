@@ -41,6 +41,12 @@
   GitHub Release / npm / Packagist 三类发布动作（v0.2.1-verify 首跑曾把测试版本推上 Releases 页并
   抢 Latest 标记）。另注：**workflow 文件取自 tag 所在 commit**——修过 `release.yml` 后必须推新 tag
   才会生效，「Re-run failed jobs」复用旧 commit 的 workflow（v0.2.1-verify 重跑不生效的原因）。
+  **收尾验证（run 34805591263）**：修复 commit 上重推 `v0.2.1-verify` 后全链路绿——Release 门禁
+  （PHPUnit+PHPStan，含 Redis/MySQL 服务容器）通过，subsplit 三个矩阵 leg 真推镜像仓成功
+  （engine/framework `main` + tag 前进，skeleton 因拆分树无变化而哈希不变），Release/npm/Packagist
+  均按预期 skip；验证后镜像仓 `main` 已还原到 v0.2.0 拆分、四个仓的 verify tag 已删净，
+  Releases 页仅剩正式版本（`v0.2.1-verify` Release 查询 404，无需人工清理）。Composer 语义上
+  `v0.2.1-verify` 为非法版本号，Packagist 全程不会索引验证 tag。
 - **发布线凭据修复：subsplit 推送以 `github-actions[bot]` 身份发出被 403（[CI/发布]，v0.2.1-verify 实测）**：
   `actions/checkout` 默认 `persist-credentials: true`，会把内置 `GITHUB_TOKEN` 写进本地 git config 的
   `http.https://github.com/.extraheader`（Authorization 头）；该头**优先级高于 push URL 里内嵌的 PAT**，
