@@ -21,6 +21,17 @@
 
 ### Fixed
 
+- **Redis 集成测试「无服务时应 skip」契约修复（[工程实践/测试]，CI 实测暴露）**：Redis 集成测试的
+  setUp 先 `new \Redis()` 再 connect、失败即 `markTestSkipped`——但 **PHPUnit 跳过测试后仍调用
+  tearDown**，而 tearDown 的守卫 `if ($this->redis === null) return;` 对「已构造但未连上」的对象
+  失效，于是对死连接执行 `keys()`/`close()` 抛 `Redis server went away`，把本已 skip 的用例变成
+  Errored。实测后果：Redis 不可用时 **149 个错误**，且 PHPUnit 对每个用例多计一次（1319 被报成
+  1468、Skipped 159 与 Errors 149 并列），直接违反 testing-guide §4「无 Redis/MySQL 时用例应 skip
+  而非 FAIL」的书面契约——v0.2.0 首发 release job 即因此红（该 job 彼时亦缺 Redis service，双重
+  叠加）。修复：15 个 Redis 集成测试类的 setUp 在 `markTestSkipped` 之前统一 `$this->redis = null;`
+  摘除未连上的对象。新增回归防护 `RedisSkipContractTest`（纯文件扫描，不依赖 Redis 可用性）钉住
+  该模式——新增 Redis 测试类漏写即红。验证：无 Redis 下全量错误 149→0、测试计数恢复 1319；
+  Redis 可用时全量 1320 全绿（含新契约测试）。
 - **发布线启用开关与文档对齐（[CI/发布]，v0.2.0 首发后收尾）**：v0.2.0 发布实测暴露 subsplit 三段
   matrix job 全失败——「job 级 env 桥接 secret + `step.if: env.X != ''`」不可靠（未定义 secret 注入
   env 后该变量不存在而非空串，判断恒真 → 未配 token 的 job 照跑并在 push 处无凭证失败）。启用开关

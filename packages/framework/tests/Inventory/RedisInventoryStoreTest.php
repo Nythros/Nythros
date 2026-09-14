@@ -32,6 +32,7 @@ final class RedisInventoryStoreTest extends TestCase
             $connected = false;
         }
         if ($connected !== true || @$this->redis->ping() !== true) {
+            $this->redis = null; // 摘除未连上的连接，避免 tearDown 对死连接清理而把 skip 变成 error
             $this->markTestSkipped('Redis 127.0.0.1:6379 不可用，跳过 RedisInventoryStore 集成测试');
         }
 

@@ -46,6 +46,11 @@ packages/<pkg>/tests/<Module>/<ClassName>Test.php   # 与 src 的 Module 目录�
 - Redis/MySQL 集成测试直连 `127.0.0.1`（root 空密码、预建 `nythros` 库），与
   `.github/workflows/ci.yml` 的 service 容器对齐；本地用根目录 `compose.yaml` 拉起同样的栈。
 - 本地无 Redis/MySQL 时相关用例应 skip 而非 FAIL（CI 保证真跑，quick-start §1.1 保证本地可复现）。
+- **资源型 setUp 的 skip 契约**：若 setUp 先构造资源对象再连接（如 `new \Redis()` + `connect()`），
+  失败 skip 前**必须**把该对象置回 null（`$this->redis = null;`）——PHPUnit **跳过测试后仍调用
+  tearDown**，tearDown 的「空值即返回」守卫只认对象为 null，对「已构造但未连上」的对象会继续执行
+  清理并抛异常，把一个 skip 变成 error。`RedisSkipContractTest` 以纯文件扫描钉住此模式（违反即红）；
+  MySQL 侧 `MySqlStorageTest` 的赋值在 skip 之后，天然安全。
 
 ## 5. E2E 验收脚本（L3）
 
